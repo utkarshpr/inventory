@@ -89,3 +89,25 @@ and cancelling an order puts the stock back. Editing an order's items afterwards
 
 Name, tagline, order prefix and open/closed live in the `restaurants` table. The logo and colours live in `src/restaurants.jsx` (logos in `src/assets/logos/`).
 A third restaurant needs a row in `restaurants` plus a logo and theme entry there.
+
+## Cancel reasons, phone tracking, app install
+- Cancelling an order asks staff for a reason, which customers see when they track the order.
+- Customers can track by reference number or by phone number (5 orders per page, with date, status, items and quantities; no names, addresses or prices).
+- Staff-made orders need the customer's 10-digit phone number. Customer-form orders count toward the order limits; staff-made orders do not.
+- The site is an installable app (`public/manifest.webmanifest`, `public/sw.js`). Staff can turn on notifications in Settings. They show while the app is open or in the background. A fully closed phone still gets alerts through the ntfy topic. True background push needs a server component (VAPID keys and a Supabase Edge Function) that is not built yet.
+- Each restaurant has a `location`, set in Settings → Kitchen profile and shown to customers.
+- **To cook** page: pending orders added up by dish for the selected restaurant (filter by not started / cooking and by delivery day, with Copy list).
+
+## Alerts when the app is closed (web push)
+This is optional and free. A new customer order reaches staff phones even when the app is closed, and only for the restaurant that phone subscribed to.
+
+1. Make a key pair: `npx web-push generate-vapid-keys`. Keep the private key secret.
+2. In Vercel, add `VITE_VAPID_PUBLIC_KEY` (the public key) and redeploy.
+3. In Supabase, set the function secrets (Project Settings → Edge Functions, or the CLI):
+   `supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:you@example.com PUSH_SHARED_SECRET=<a long random string>`
+4. Deploy the function: `supabase functions deploy send-push --no-verify-jwt`
+5. Tell the database where it is (SQL editor, same random string as step 3). `pg_net` must be enabled:
+   `update public.push_config set function_url = 'https://YOUR-PROJECT-REF.supabase.co/functions/v1/send-push', shared_secret = '<same random string>';`
+6. On each staff phone: open the site, install the app, then Settings → App & notifications → "Alerts when the app is closed" → Turn on. Do it once for each restaurant that phone should hear about.
+
+The ntfy topic in Settings keeps working as a separate backup.

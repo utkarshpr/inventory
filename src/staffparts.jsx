@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { supabase } from './supabase'
 import { Mark, themeStyle, deliveryDates, zonedNow, deliveryText, WEEKDAYS } from './restaurants'
 
 /* Pick which restaurant you are managing. Each option shows that restaurant's logo + name. */
@@ -182,4 +183,83 @@ export function OrderLimitsSettings({ limits, onSave }) {
       <button className="primary lset-save" disabled={!ok}>Save order limits</button>
     </div>
   </form>
+}
+
+/* System notification for a new order. Only shown when the app is in the background, because the
+   in-app popup and sound already cover the case where it is open. */
+export function systemNotify(order, restaurantName) {
+  try {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted' || !document.hidden) return
+    const title = `New order · ${restaurantName}`
+    const opts = { body: `${order.id} · ₹${order.total} · ${order.customer}`, tag: order.id, renotify: true, requireInteraction: true, vibrate: [200, 100, 200], icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', data: { url: '/' } }
+    if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(reg => reg ? reg.showNotification(title, opts) : new Notification(title, opts)).catch(() => {})
+    else new Notification(title, opts)
+  } catch { /* notifications are optional */ }
+}
+
+/* Install the app to the home screen + allow notifications on this device. */
+const VAPID_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
+const keyBytes = (b64) => { const pad = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))) }
+
+export function AppInstallCard({ notify, restaurant }) {
+  const pushOk = Boolean(VAPID_KEY) && typeof window !== 'undefined' && 'PushManager' in window && 'serviceWorker' in navigator && Boolean(supabase)
+  const [pushOn, setPushOn] = useState(false), [pushBusy, setPushBusy] = useState(false)
+  const rid = restaurant && restaurant.id
+  useEffect(() => {   // is this phone already subscribed for the restaurant being managed?
+    setPushOn(false)
+    if (!pushOk || !rid) return
+    let alive = true
+    navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
+      if (!sub || !alive) return
+      return supabase.from('push_subscriptions').select('endpoint').eq('endpoint', sub.endpoint).eq('restaurant_id', rid).maybeSingle().then(({ data }) => { if (alive) setPushOn(Boolean(data)) })
+    }).catch(() => {})
+    return () => { alive = false }
+  }, [pushOk, rid])
+  const turnPushOn = async () => {
+    setPushBusy(true)
+    try {
+      const p = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
+      if (p !== 'granted') return notify && notify('Notifications are blocked for this site')
+      const reg = await navigator.serviceWorker.ready
+      const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_KEY) })
+      const j = sub.toJSON()
+      const { error } = await supabase.from('push_subscriptions').upsert({ endpoint: j.endpoint, restaurant_id: rid, p256dh: j.keys.p256dh, auth: j.keys.auth })
+      if (error) return notify && notify(`Could not turn on alerts: ${error.message}`)
+      setPushOn(true); notify && notify(`Closed-app alerts on for ${restaurant.name}`)
+    } catch (e) { notify && notify(`Could not turn on alerts: ${e.message || 'unknown error'}`) } finally { setPushBusy(false) }
+  }
+  const turnPushOff = async () => {
+    setPushBusy(true)
+    try {
+      const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription()
+      if (sub) await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint).eq('restaurant_id', rid)
+      setPushOn(false); notify && notify(`Closed-app alerts off for ${restaurant.name}`)
+    } catch { /* ignore */ } finally { setPushBusy(false) }
+  }
+  const supported = typeof Notification !== 'undefined'
+  const [perm, setPerm] = useState(() => supported ? Notification.permission : 'unsupported')
+  const [prompt, setPrompt] = useState(null)
+  const standalone = () => { try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true } catch { return false } }
+  const [installed, setInstalled] = useState(standalone)
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent || '')
+  useEffect(() => {
+    const onPrompt = (e) => { e.preventDefault(); setPrompt(e) }
+    const onInstalled = () => { setInstalled(true); setPrompt(null) }
+    window.addEventListener('beforeinstallprompt', onPrompt); window.addEventListener('appinstalled', onInstalled)
+    return () => { window.removeEventListener('beforeinstallprompt', onPrompt); window.removeEventListener('appinstalled', onInstalled) }
+  }, [])
+  const install = async () => { if (!prompt) return; prompt.prompt(); try { await prompt.userChoice } catch { /* ignore */ } setPrompt(null) }
+  const ask = async () => { try { const p = await Notification.requestPermission(); setPerm(p); if (p === 'granted') { const reg = await navigator.serviceWorker?.getRegistration(); const opts = { body: 'You will see new orders here when the app is in the background.', icon: '/icons/icon-192.png', tag: 'test' }; reg ? reg.showNotification('Notifications are on', opts) : new Notification('Notifications are on', opts); notify && notify('Notifications turned on') } } catch { /* ignore */ } }
+  return <section className="panel appcard">
+    <div className="panel-heading"><div><h3>App &amp; notifications · this device</h3><p>Add the app to your home screen and get a notification when a new order comes in.</p></div></div>
+    <div className="rset-body">
+      <div className="app-row"><div><b>Home screen app</b><small>{installed ? 'Installed. You are using the app.' : prompt ? 'Opens full screen, like any other app.' : ios ? 'On iPhone: tap the Share button, then "Add to Home Screen".' : 'In Chrome, open the menu and choose "Install app" or "Add to Home screen".'}</small></div>
+        {installed ? <span className="stock">Installed</span> : prompt ? <button className="primary app-btn" onClick={install}>Install app</button> : null}</div>
+      <div className="app-row"><div><b>New-order notifications</b><small>{perm === 'granted' ? 'On for this device. Shown when the app is in the background.' : perm === 'denied' ? 'Blocked. Allow notifications for this site in your browser settings.' : perm === 'unsupported' ? (ios && !installed ? 'On iPhone, add the app to your home screen first, then turn this on.' : 'This browser does not support notifications.') : 'Off. Turn on to see new orders even when you are in another app.'}</small></div>
+        {perm === 'default' && <button className="primary app-btn" onClick={ask}>Turn on</button>}{perm === 'granted' && <span className="stock">On</span>}</div>
+      {pushOk && restaurant && <div className="app-row"><div><b>Alerts when the app is closed · {restaurant.name}</b><small>{pushOn ? `On for this phone. New ${restaurant.name} orders reach you even when the app is closed. Other restaurants are not mixed in.` : `Off. Turn on to get ${restaurant.name} orders even when the app is closed. Do this on each restaurant you manage.`}</small></div>
+        {pushOn ? <button className="text-btn" disabled={pushBusy} onClick={turnPushOff}>Turn off</button> : <button className="primary app-btn" disabled={pushBusy} onClick={turnPushOn}>Turn on</button>}</div>}
+      <p className="lset-note">{pushOk ? 'Alerts for a closed app come from the server. The phone alert topic above (ntfy) is a separate backup.' : 'Notifications appear while the app is open or in the background. If the app is fully closed, phone alerts (the topic above, via ntfy) still reach you.'}</p>
+    </div>
+  </section>
 }

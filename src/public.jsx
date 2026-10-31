@@ -11,12 +11,16 @@ const icons = {
   plus: <path d="M12 5v14M5 12h14" />,
   minus: <path d="M5 12h14" />,
 }
+const PinIcon = () => <svg className="c-pin" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6a2.5 2.5 0 0 1 0 5.5z"/></svg>
+
 function Ico({ n, size = 22 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{icons[n]}</svg>
 }
 
 // last order reference: one per restaurant (so a restaurant page only ever shows its own order) plus one overall for the home page
 const readSaved = (slug) => { try { return localStorage.getItem(slug ? `last-order-ref:${slug}` : 'last-order-ref') || '' } catch { return '' } }
+const itemText = (items) => (items || []).map(i => /^\d+\s*×/.test(i.name || '') ? i.name : `${i.quantity}× ${i.name}`).join(', ')
+const placedText = (iso) => iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) : ''
 const money = (n) => `₹${Number(n).toLocaleString('en-IN')}`
 
 export async function copyText(text) {
@@ -70,6 +74,7 @@ function Home({ list, onStaff, missing }) {
         <img className="c-tile-logo c-logo" src={logoFor(r.slug)} alt={`${r.name} logo`} />
         <span className="c-tile-name">{r.name}</span>
         {r.tagline && <span className="c-tile-tag">{r.tagline}</span>}
+        {r.location && <span className="c-loc"><PinIcon />{r.location}</span>}
         <span className={r.is_open ? 'c-status open' : 'c-status closed'}>{r.is_open ? 'Open now' : 'Closed'}</span>
       </a>)}</div>
       <section className="c-track-wrap"><TrackOrder initialRef={savedRef} /></section>
@@ -90,6 +95,7 @@ function RestaurantLanding({ r, list, onStaff }) {
         <img className="c-logo c-logo-lg" src={logoFor(r.slug)} alt={`${r.name} logo`} width="112" height="112" />
         <h1 className="c-wordmark">{lines.map((l, i) => <React.Fragment key={i}>{i > 0 && <br />}{l}</React.Fragment>)}</h1>
         {r.tagline && <p className="c-tagline">{r.tagline}</p>}
+        {r.location && <p className="c-loc c-loc-hero"><PinIcon />{r.location}</p>}
         <p className="c-sched">Delivers {scheduleLabel(r)}</p>
       </div>
       <div className="c-hero-foot">
@@ -106,10 +112,23 @@ function RestaurantLanding({ r, list, onStaff }) {
 
 /* ---------- Order tracking (works with any reference number) ---------- */
 export function TrackOrder({ initialRef, compact, slug }) {
-  const [code, setCode] = useState(() => readSaved(slug)), [result, setResult] = useState(null), [msg, setMsg] = useState(''), [active, setActive] = useState('')
+  const [code, setCode] = useState(() => readSaved(slug)), [result, setResult] = useState(null), [msg, setMsg] = useState(''), [active, setActive] = useState(''), [list, setList] = useState(null)
+  const PAGE = 5
+  const phoneOf = (v) => { const t = (v || '').trim(); return /^[+\d\s-]+$/.test(t) && t.replace(/\D/g, '').length >= 10 ? t : '' }
+  const loadPhone = async (phone, page) => {
+    if (!supabase) return setMsg('Tracking is not available right now.')
+    setMsg('Checking…')
+    const { data, error } = await supabase.rpc('track_orders_by_phone', { p_phone: phone, p_limit: PAGE, p_offset: page * PAGE })
+    if (error) return setMsg((error.message || '').replace(/^INVALID_PHONE:\s*/, '') || 'Could not check this number.')
+    setResult(null); setActive('')
+    if (!data || !data.total) { setList(null); return setMsg('No orders found for that phone number.') }
+    setList({ phone, page, total: data.total, orders: data.orders }); setMsg('')
+  }
   const lookup = async (value, quiet) => {
     const ref = (value || '').trim().toUpperCase()
     if (!ref) return
+    if (!quiet && phoneOf(value)) return loadPhone(phoneOf(value), 0)
+    if (!quiet) setList(null)
     if (!supabase) return setMsg('Tracking is not available right now.')
     if (!quiet) setMsg('Checking…')
     const { data, error } = await supabase.rpc('track_order', { p_order_number: ref })
@@ -129,16 +148,27 @@ export function TrackOrder({ initialRef, compact, slug }) {
     {!compact && <>
       <h2 className="c-h2">Track your order</h2>
       <form className="track-form c-trackform" onSubmit={e => { e.preventDefault(); lookup(code) }}>
-        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Reference number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
+        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Reference or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
         <button className="c-btn c-btn-ink">Track</button>
       </form>
     </>}
     {msg && <p className="c-note">{msg}</p>}
+    {list && <div className="c-orders" aria-label="Orders for this phone number">
+      <p className="c-sub">{list.total} order{list.total === 1 ? '' : 's'} for this number. Tap one to see its status.</p>
+      <ul className="c-ordlist">{list.orders.map(o => <li key={o.order_number}><button type="button" className={o.order_number === active ? 'c-ordrow on' : 'c-ordrow'} onClick={() => lookup(o.order_number, true)}>
+        {logoFor(o.restaurant_slug) && <img className="c-logo" src={logoFor(o.restaurant_slug)} alt="" width="32" height="32" />}
+        <span className="c-ordmain"><b>{o.order_number}</b><small>{o.restaurant} · {placedText(o.placed_at)} · {money(o.total)}</small><small className="c-orditems">{itemText(o.items)}</small></span>
+        <span className={o.status === 'Cancelled' ? 'c-pill bad' : o.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{o.status}</span>
+      </button></li>)}</ul>
+      {list.total > PAGE && <div className="c-pager"><button type="button" className="c-btn c-btn-line" disabled={list.page === 0} onClick={() => loadPhone(list.phone, list.page - 1)}>Previous</button><span>Page {list.page + 1} of {Math.ceil(list.total / PAGE)}</span><button type="button" className="c-btn c-btn-line" disabled={(list.page + 1) * PAGE >= list.total} onClick={() => loadPhone(list.phone, list.page + 1)}>Next</button></div>}
+    </div>}
     {result && (result.status === 'Cancelled'
-      ? <p className="c-note c-note-bad">Order {result.order_number} was cancelled. Please contact the kitchen.</p>
+      ? <p className="c-note c-note-bad">Order {result.order_number} was cancelled.{result.cancel_reason ? <> <b>Reason:</b> {result.cancel_reason}</> : ' Please contact the kitchen.'}</p>
       : <div className="track-result c-result">
           {result.restaurant && <p className="c-rest-chip">{logoFor(result.restaurant_slug) && <img className="c-logo" src={logoFor(result.restaurant_slug)} alt="" width="24" height="24" />}<span>{result.restaurant}</span></p>}
           <div className="c-result-head">{compact ? <span className="c-sub">Order status</span> : <b>{result.order_number}</b>}<span className={result.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{label}</span></div>
+          {result.placed_at && <p className="c-sub">Placed {placedText(result.placed_at)}</p>}
+          {result.items && result.items.length > 0 && <p className="c-sub c-items">{itemText(result.items)}</p>}
           {result.delivery_date && <p className="c-sub c-deliver">Delivery: {deliveryText(result.delivery_date, zonedNow('Asia/Kolkata').date)}</p>}
           <ol className="c-steps">{STEPS.map(([status, text], i) => <li key={status} style={{ '--i': i }} className={i < current ? 'done' : i === current ? 'now' : ''}>{text}</li>)}</ol>
           <p className="c-sub">Total {money(result.total)}. This updates by itself.</p>

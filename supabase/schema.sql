@@ -80,6 +80,8 @@ on conflict (slug) do nothing;
 create or replace function public.default_restaurant_id() returns uuid
 language sql stable as $$ select id from public.restaurants where slug = 'salt-and-saffron' $$;
 
+alter table public.restaurants      add column if not exists location text;
+update public.restaurants set location = 'Pune' where location is null and slug in ('salt-and-saffron', 'oven-and-chives');
 alter table public.orders           add column if not exists restaurant_id uuid references public.restaurants(id);
 alter table public.recipes          add column if not exists restaurant_id uuid references public.restaurants(id);
 alter table public.inventory_items  add column if not exists restaurant_id uuid references public.restaurants(id);
@@ -135,6 +137,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 alter table public.orders add column if not exists delivery_date date;
+alter table public.orders add column if not exists cancel_reason text;
 update public.orders set delivery_date = (created_at at time zone 'Asia/Kolkata')::date where delivery_date is null;   -- older orders: delivered on the day they were placed
 alter table public.orders alter column delivery_date set default ((now() at time zone 'Asia/Kolkata')::date);
 alter table public.orders alter column delivery_date set not null;
@@ -307,9 +310,9 @@ begin
   end if;
   -- Limits per phone number (all restaurants together) and per network address
   select coalesce(max(per_phone_hour), 3), coalesce(max(per_phone_day), 8), coalesce(max(per_connection_hour), 20) into v_ph, v_pd, v_ch from public.order_limits;
-  select count(*) into n from public.orders where customer_phone = v_phone and created_at > now() - interval '1 hour';
+  select count(*) into n from public.orders where customer_phone = v_phone and channel = 'Customer form' and created_at > now() - interval '1 hour';
   if v_ph > 0 and n >= v_ph then raise exception 'RATE_LIMIT: Too many orders from this phone number. Please try again in a little while, or call the kitchen.'; end if;
-  select count(*) into n from public.orders where customer_phone = v_phone and created_at > now() - interval '24 hours';
+  select count(*) into n from public.orders where customer_phone = v_phone and channel = 'Customer form' and created_at > now() - interval '24 hours';
   if v_pd > 0 and n >= v_pd then raise exception 'RATE_LIMIT: Too many orders from this phone number today. Please call the kitchen.'; end if;
   begin
     v_ip := nullif(trim(split_part(coalesce((nullif(current_setting('request.headers', true), ''))::json ->> 'x-forwarded-for', ''), ',', 1)), '');
@@ -395,16 +398,43 @@ grant execute on function public.place_order(text, text, text, text, text, jsonb
 -- ============================================================
 -- 4. Customer order tracking (status only, needs the exact reference number)
 -- ============================================================
+-- Item names and quantities only (no prices or notes), safe to show on the tracking page.
+create or replace function public.public_items(p jsonb) returns jsonb
+language sql immutable set search_path = public as $$
+  select coalesce(jsonb_agg(case when jsonb_typeof(i) = 'object'
+      then jsonb_build_object('name', i->>'name', 'quantity', coalesce(i->'quantity', '1'::jsonb))
+      else jsonb_build_object('name', i #>> '{}', 'quantity', 1) end), '[]'::jsonb)
+  from jsonb_array_elements(case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end) i
+$$;
+
 create or replace function public.track_order(p_order_number text)
 returns jsonb
 language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
     'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-    'delivery_date', o.delivery_date, 'restaurant', r.name, 'restaurant_slug', r.slug)
+    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
   from public.orders o join public.restaurants r on r.id = o.restaurant_id
   where o.order_number = upper(trim(p_order_number))
   limit 1;
 $$;
+-- Orders for one phone number, newest first, a page at a time. Shows date, status, items and quantities only: no names, addresses or prices.
+create or replace function public.track_orders_by_phone(p_phone text, p_limit int default 5, p_offset int default 0)
+returns jsonb
+language plpgsql security definer set search_path = public stable as $$
+declare v_phone text := right(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g'), 10); v_lim int := least(greatest(coalesce(p_limit, 5), 1), 20); v_off int := greatest(coalesce(p_offset, 0), 0); v_total int; v_rows jsonb;
+begin
+  if length(v_phone) <> 10 or v_phone !~ '^[6-9]' then raise exception 'INVALID_PHONE: Enter a valid 10-digit mobile number'; end if;
+  select count(*) into v_total from public.orders where customer_phone = v_phone;
+  select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
+    select jsonb_build_object('order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
+      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
+    from public.orders o join public.restaurants r on r.id = o.restaurant_id
+    where o.customer_phone = v_phone order by o.created_at desc limit v_lim offset v_off) s;
+  return jsonb_build_object('total', v_total, 'limit', v_lim, 'offset', v_off, 'orders', v_rows);
+end $$;
+revoke all on function public.track_orders_by_phone(text, int, int) from public;
+grant execute on function public.track_orders_by_phone(text, int, int) to anon, authenticated;
+
 revoke all on function public.track_order(text) from public;
 grant execute on function public.track_order(text) to anon, authenticated;
 
@@ -501,6 +531,58 @@ begin
   return new;
 end $$;
 revoke all on function public.notify_owner() from public, anon, authenticated;
+
+-- ------------------------------------------------------------
+-- Alerts that reach staff phones even when the app is closed (web push).
+-- Each device subscribes for one restaurant at a time; an order only alerts its own restaurant.
+-- ------------------------------------------------------------
+create table if not exists public.push_subscriptions (
+  endpoint text not null,
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now(),
+  primary key (endpoint, restaurant_id)
+);
+alter table public.push_subscriptions enable row level security;
+drop policy if exists "Staff can manage push subscriptions" on public.push_subscriptions;
+create policy "Staff can manage push subscriptions" on public.push_subscriptions for all to authenticated using (true) with check (true);
+
+-- Where to send the alert (the send-push function) and the shared secret it expects.
+-- No policies on purpose: only the database itself reads it, never the app.
+create table if not exists public.push_config (
+  id boolean primary key default true check (id),
+  function_url text,
+  shared_secret text
+);
+insert into public.push_config (id) values (true) on conflict (id) do nothing;
+alter table public.push_config enable row level security;
+
+create or replace function public.push_owner()
+returns trigger
+language plpgsql security definer set search_path = public, extensions as $$
+declare c record; rname text;
+begin
+  if new.channel <> 'Customer form' then return new; end if;
+  select function_url, shared_secret into c from public.push_config limit 1;
+  if c.function_url is null or c.shared_secret is null then return new; end if;
+  if not exists (select 1 from public.push_subscriptions where restaurant_id = new.restaurant_id) then return new; end if;
+  select name into rname from public.restaurants where id = new.restaurant_id;
+  begin
+    perform net.http_post(
+      url := c.function_url,
+      headers := jsonb_build_object('Content-Type', 'application/json', 'x-push-secret', c.shared_secret),
+      body := jsonb_build_object('restaurant_id', new.restaurant_id, 'restaurant', rname, 'order_number', new.order_number,
+        'total', new.total, 'delivery_date', new.delivery_date));
+  exception when others then
+    raise warning 'push alert skipped: %', sqlerrm;   -- never block an order because an alert failed
+  end;
+  return new;
+end $$;
+revoke all on function public.push_owner() from public, anon, authenticated;
+drop trigger if exists orders_push_owner on public.orders;
+create trigger orders_push_owner after insert on public.orders
+  for each row execute function public.push_owner();
 
 drop trigger if exists orders_notify_owner on public.orders;
 create trigger orders_notify_owner after insert on public.orders

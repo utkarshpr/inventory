@@ -45,3 +45,11 @@ Settings > Phone alerts > **Make one** > subscribe in the ntfy app > **Send test
 
 ## 9. The kitchen tablet
 Leave the dashboard open. The strip shows **Live**, **Sound on**, **Screen stays on**. Lock the screen for a minute, unlock it: it reconnects, and any order that arrived meanwhile pops up.
+
+## 8. Cancel reason, phone tracking, app install
+- In Orders, set an order to Cancelled. A box asks for a reason (the Cancel button stays off until you give one). Then track that order on the home page: the reason is shown.
+- Record a staff order without a phone number: it is refused. With a 10-digit number it saves.
+- On the home page, type a customer phone number in "Track your order". You should see that number's orders, 5 per page, each with date, status, items and quantities. Tap one to see its steps.
+- Open the site on your phone, go to Settings, and use "App & notifications": install the app (Android: Install app; iPhone: Share, then Add to Home Screen), then turn notifications on. Put the app in the background, place a test order from another device, and confirm a notification arrives.
+- Open "To cook". With a few New orders for the same dish, confirm the dish shows one total (for example 4 × Panner Tikka, in 2 orders). Use the Not started / Cooking / Both and day filters, and "Copy list".
+- If you set up closed-app alerts (README): turn them on for one restaurant on your phone, close the app completely, place a test order for that restaurant from another device and confirm the notification arrives. Place one for the other restaurant and confirm nothing arrives.

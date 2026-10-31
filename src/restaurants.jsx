@@ -13,8 +13,8 @@ export const logoFor = (slug) => LOGOS[slug] || null
 // Used until the database answers (or if it can't be reached), so a name + logo is always shown.
 const DELIVERY_DEFAULTS = { min_order_value: 0, timezone: 'Asia/Kolkata', delivery_mode: 'daily', delivery_weekdays: [], delivery_anchor: null, advance_days: 6, allow_same_day: true, order_cutoff: null }
 export const FALLBACK = [
-  { id: null, slug: 'salt-and-saffron', name: 'Salt & Saffron', tagline: 'Cloud kitchen, Pune', order_prefix: 'SS', is_open: true, closed_message: null, whatsapp_url: 'https://chat.whatsapp.com/DGSd2zyxnJJ3vDUPs37OSy?s=cl&p=a&iam=2', ...DELIVERY_DEFAULTS },
-  { id: null, slug: 'oven-and-chives', name: 'Oven & Chives', tagline: 'Fresh from the oven', order_prefix: 'OC', is_open: true, closed_message: null, whatsapp_url: 'https://chat.whatsapp.com/G4GsNiGEmGlIwk1EbcFiRM', ...DELIVERY_DEFAULTS },
+  { id: null, slug: 'salt-and-saffron', name: 'Salt & Saffron', tagline: 'Cloud kitchen, Pune', location: 'Pune', order_prefix: 'SS', is_open: true, closed_message: null, whatsapp_url: 'https://chat.whatsapp.com/DGSd2zyxnJJ3vDUPs37OSy?s=cl&p=a&iam=2', ...DELIVERY_DEFAULTS },
+  { id: null, slug: 'oven-and-chives', name: 'Oven & Chives', tagline: 'Fresh from the oven', location: 'Pune', order_prefix: 'OC', is_open: true, closed_message: null, whatsapp_url: 'https://chat.whatsapp.com/G4GsNiGEmGlIwk1EbcFiRM', ...DELIVERY_DEFAULTS },
 ]
 
 const THEMES = {

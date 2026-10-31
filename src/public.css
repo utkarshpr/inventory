@@ -226,3 +226,21 @@ html{-webkit-text-size-adjust:100%}
 @keyframes c-draw{to{stroke-dashoffset:0}}
 .c-app .c-min{margin:-10px 0 14px;font-weight:600}
 .c-app .c-days{scroll-padding:0 20px}
+
+/* location line */
+.c-app .c-loc{display:inline-flex;align-items:center;gap:5px;font-size:14px;font-weight:600;opacity:.9;margin-top:2px}
+.c-app .c-loc-hero{font-size:15px;margin:-4px 0 0}
+.c-app .c-pin{flex:none}
+
+/* phone-number order list */
+.c-app .c-orders{margin-top:14px}
+.c-app .c-ordlist{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:8px}
+.c-app .c-ordrow{width:100%;display:flex;align-items:center;gap:12px;text-align:left;min-height:56px;padding:10px 12px;border-radius:14px;border:1px solid var(--c-line);background:transparent;color:inherit;font:inherit;cursor:pointer}
+.c-app .c-ordrow.on{border-color:currentColor}
+.c-app .c-ordmain{flex:1;min-width:0;display:grid}
+.c-app .c-ordmain small{opacity:.75;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-app .c-ordmain .c-orditems{white-space:normal;opacity:.9;margin-top:2px}
+.c-app .c-pill.bad{color:var(--c-chilli)}
+.c-app .c-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:14px}
+.c-app .c-pager .c-btn{min-height:44px;padding:0 16px}
+.c-app .c-pager .c-btn:disabled{opacity:.4;cursor:not-allowed}
