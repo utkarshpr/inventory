@@ -15,3 +15,44 @@
 .today-menu-head{display:flex;justify-content:space-between;align-items:center;gap:18px}.view-order-link{border:1px solid #c48164;border-radius:7px;padding:8px 10px;color:#743e2e;background:#fff5ef;text-decoration:none;display:flex;align-items:center;gap:6px;white-space:nowrap;font:600 11px 'DM Sans'}@media(max-width:760px){.today-menu-head{align-items:flex-start;flex-direction:column;gap:10px}}
 
 .order-items .order-meta{display:block;white-space:normal;margin-top:4px;color:var(--muted);font-size:10px;line-height:1.4}
+
+/* --- orders: actions, filters --- */
+.row-actions{display:flex;flex-direction:column;align-items:flex-start;gap:2px}
+.row-actions .edit-order{padding:3px 5px}
+@media(min-width:1051px){.order-row{grid-template-columns:34px 1.1fr 1.65fr 72px 78px 52px}.full-orders .order-row{grid-template-columns:40px 1.1fr 1.7fr 80px 84px 56px}}
+.page-toolbar{flex-wrap:wrap;gap:12px}
+.filters{display:flex;gap:8px;margin-left:auto}
+.filters select{border:1px solid var(--line);border-radius:7px;background:#fff;padding:8px 10px;font:11px 'DM Sans';color:#4b433f;cursor:pointer}
+.icon-btn.muted{opacity:.45}
+.inv-status{display:flex;align-items:center;gap:8px}
+.modal label small{font-weight:400;color:var(--muted)}
+/* --- reports --- */
+.report-gap{margin-top:20px}
+.report-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* --- customer: tracking --- */
+.customer-submit:disabled{opacity:.6;cursor:wait}
+.track-card{margin-top:20px}
+.track-card h2{margin-bottom:4px}
+.track-form{display:flex;gap:8px;margin-top:12px}
+.track-form input{flex:1;border:1px solid #ded6ce;border-radius:6px;padding:10px;font:13px 'DM Sans';background:#fff;text-transform:uppercase;min-width:0}
+.track-result b{display:block;font:600 14px 'DM Mono',monospace;margin:16px 0 10px}
+.track-steps{display:flex;gap:6px}
+.track-step{flex:1;text-align:center;font-size:10px;color:#9a9089}
+.track-step i{display:block;height:6px;border-radius:6px;background:#ebe3da;margin-bottom:6px}
+.track-step.done i{background:#7aa88a}.track-step.done span{color:#4b7a5d}
+.track-step.now i{background:#e58b70}.track-step.now span{color:#b0583f;font-weight:700}
+.track-result small{display:block;margin-top:12px;color:var(--muted)}
+
+/* customer + login pages use <main> but have no sidebar: undo the dashboard offset */
+.customer-page,.auth-page{margin-left:0;width:100%;max-width:none}
+
+/* --- landing page + copyable reference toast --- */
+.landing-card{text-align:center}
+.landing-card h1{margin-bottom:8px}
+.landing-order{width:100%;justify-content:center;padding:15px;font-size:14px;text-decoration:none;margin-top:18px;box-sizing:border-box}
+.toast-ref{display:flex;align-items:center;gap:12px;max-width:calc(100vw - 40px)}
+.toast-ref button{border:1px solid #ffffff66;background:transparent;color:#fff;border-radius:6px;padding:4px 10px;font:600 11px 'DM Sans';cursor:pointer;white-space:nowrap}
+.toast-ref button:hover{background:#ffffff22}
+.track-form input::placeholder{text-transform:none}
+.staff-link{display:block;margin:22px auto 0;color:#8a7f78;font-size:12px}
+.back-home{margin:16px auto 0;display:flex}
