@@ -1,16 +1,47 @@
-# Salt&Saffron — kitchen operations
+# Salt & Saffron and Oven & Chives
 
-A React + Supabase app for a cloud kitchen: live orders, recipes, inventory, reports, and a public ordering page.
+One app, two independent restaurants. Each has its own logo, name, colours, menu, recipes, stock, orders, reports and open/closed switch.
 
-- **Home page** (`/`): one address for everyone. Customers see **Order now** and order tracking. Staff click **Staff sign in**; once signed in, `/` opens the dashboard (orders, today's menu, recipes, inventory, reports). `/admin` goes straight to the staff sign-in.
-- **Customer page** (`/order`): customers order from the published menu and can track their order by reference number.
+## Addresses
+
+| Address | What it is |
+|---|---|
+| `/` | Customers: choose a restaurant, track an order. Staff: when signed in, the dashboard. |
+| `/salt-and-saffron` | Salt & Saffron's own page (terracotta + gold, from its logo) |
+| `/oven-and-chives` | Oven & Chives' own page (sage + forest green, from its logo) |
+| `/<restaurant>/order` | That restaurant's order page |
+| `/admin` | Staff sign-in |
+
+Old `/order` links keep working (they go to Salt & Saffron).
+
+## What is separate per restaurant
+
+Orders, recipes (the menu is the recipes marked *published*), recipe ingredients, inventory, reports and the open/closed switch all belong to exactly one restaurant (`restaurant_id`).
+The database enforces it: an order can only contain dishes from its own restaurant, stock only goes down for the restaurant that took the order, and a recipe can only use stock items from its own restaurant.
+Shared on purpose: one staff login manages both, and every order reference is unique, so tracking works from anywhere.
+
+## Staff
+
+- Switch restaurant with the selector at the top of the dashboard. The whole dashboard changes colour to match.
+- **Open / Closed** is the kill switch for the selected restaurant. When closed, its page shows "Closed", the menu is hidden, and the server refuses orders. The other restaurant is unaffected.
+- New customer orders pop up on screen with full details and a sound, **only for the restaurant you have selected**. An order at the other restaurant gives no popup, sound, badge or tab alert here. To be alerted at both, keep one device on each restaurant (the selection is remembered per device).
+
+## Delivery days (per restaurant)
+
+In **Settings** each restaurant sets when it delivers: every day, alternate days (pick the first delivery day), or chosen weekdays. It also sets how far ahead customers can order and an optional same-day cut-off time.
+Customers pick one of the allowed days when ordering, and the server re-checks it, so an order for a day the kitchen doesn't deliver is refused.
+Orders are listed by delivery date (today first, then upcoming days, then earlier days), grouped under day headings. Every order needs a delivery address and a delivery date.
+
+## WhatsApp group (per restaurant)
+
+Each restaurant has its own group link, shown as "Join our WhatsApp group" on its page, its order confirmation and its closed page. Staff can change it in Settings (only `https://chat.whatsapp.com/...` links are accepted).
 
 ## Setup
 
 1. `npm install`
 2. Copy `.env.example` to `.env.local` and add your Supabase URL and anon key.
 3. In Supabase open **SQL Editor**, paste all of [`supabase/schema.sql`](./supabase/schema.sql) and run it.
-   It is safe to run again whenever the file changes.
+   It is safe to run again whenever the file changes. Existing data is assigned to Salt & Saffron.
 4. **Create your staff login:** Supabase > Authentication > Users > *Add user* (email + password, tick "Auto Confirm").
 5. **Turn off public sign-ups:** Supabase > Authentication > Sign In / Providers > disable *Allow new users to sign up*.
    Any signed-in user is treated as staff, so this step matters.
@@ -38,5 +69,10 @@ and cancelling an order puts the stock back. Editing an order's items afterwards
 ## Staff dashboard tips
 
 - The bell icon toggles the new-order sound (customer orders only). Browsers only allow sound after you have clicked once on the page.
-- Each order row has **Print** (kitchen ticket) and **Edit**.
+- Orders open read-only. Press **Enable editing** to change one. The delivery address has a **Copy** button (also on each order row).
 - Reports show a food-cost based *estimated* profit: sales minus each recipe's food-cost %.
+
+## Adding or changing a restaurant
+
+Name, tagline, order prefix and open/closed live in the `restaurants` table. The logo and colours live in `src/restaurants.jsx` (logos in `src/assets/logos/`).
+A third restaurant needs a row in `restaurants` plus a logo and theme entry there.
