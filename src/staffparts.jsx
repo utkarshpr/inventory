@@ -60,12 +60,23 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear })
 }
 
 /* This restaurant's own delivery days and WhatsApp group. Changes only affect the selected restaurant. */
-export function RestaurantSettings({ r, onSave }) {
+export function RestaurantSettings({ r, secrets, onSave }) {
   const todayIso = zonedNow(r.timezone || 'Asia/Kolkata').date
-  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '' })
+  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
   const [f, setF] = useState(init)
-  useEffect(() => { setF(init()) }, [r.id])
+  useEffect(() => { setF(init()) }, [r.id, secrets && secrets.alert_topic])
   const set = (patch) => setF(cur => ({ ...cur, ...patch }))
+  const [testMsg, setTestMsg] = useState('')
+  const topicOk = !f.topic.trim() || /^[A-Za-z0-9_-]{8,64}$/.test(f.topic.trim())
+  const minOk = f.minOrder === '' || Number(f.minOrder) >= 0
+  const makeTopic = () => { const bytes = crypto.getRandomValues(new Uint8Array(10)); set({ topic: `${(r.order_prefix || 'kitchen').toLowerCase()}-${Array.from(bytes, b => (b % 36).toString(36)).join('')}` }); setTestMsg('') }
+  const sendTest = async () => {
+    setTestMsg('Sending…')
+    try {
+      const res = await fetch('https://ntfy.sh/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ topic: f.topic.trim(), title: `${r.name}: test alert`, message: 'If you can read this, phone alerts are working.', priority: 4, tags: ['white_check_mark'] }) })
+      setTestMsg(res.ok ? 'Test sent. Check your phone.' : 'The alert service did not accept that. Check the topic.')
+    } catch { setTestMsg('Could not reach the alert service. Check your internet connection.') }
+  }
   const effective = { ...r, delivery_mode: f.mode, delivery_weekdays: f.weekdays, delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null }
   const preview = deliveryDates(effective)
   const waOk = !f.whatsapp.trim() || /^https:\/\/chat\.whatsapp\.com\//.test(f.whatsapp.trim())
@@ -74,8 +85,8 @@ export function RestaurantSettings({ r, onSave }) {
   const aheadOptions = [...new Set([1, 2, 3, 5, 7, 10, 14, 21, 30, Number(f.ahead)])].sort((a, b) => a - b)
   const submit = (e) => {
     e.preventDefault()
-    if (customEmpty || !waOk) return
-    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null })
+    if (customEmpty || !waOk || !topicOk || !minOk) return
+    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
   }
   return <form className="panel rset" onSubmit={submit}>
     <div className="panel-heading"><div><h3>Delivery days · {r.name}</h3><p>Customers can only pick these days when ordering. This changes {r.name} only.</p></div></div>
@@ -105,12 +116,70 @@ export function RestaurantSettings({ r, onSave }) {
           : <p>No days. Customers can't order until you add delivery days.</p>}
       </div>
 
+      <label className="rset-field">Minimum order (₹)
+        <input type="number" min="0" step="1" inputMode="numeric" value={f.minOrder} onChange={e => set({ minOrder: e.target.value })} />
+        <small>Customers can't place an order below this amount. 0 means no minimum.</small></label>
+      {!minOk && <p className="rset-warn" role="alert">The minimum order can't be negative.</p>}
+
+      <div className="rset-alerts">
+        <b>Phone alerts</b>
+        <p>Get a notification on your phone for every new customer order at {r.name}, even when the dashboard is closed. Free, using the ntfy app.</p>
+        <ol><li>Install the <b>ntfy</b> app (Android or iPhone).</li><li>Make a topic below and subscribe to it in the app.</li><li>Press <b>Send test</b>, then <b>Save</b>.</li></ol>
+        <div className="rset-field"><span>Alert topic</span>
+          <div className="rset-inline">
+            <input aria-label="Alert topic" value={f.topic} onChange={e => set({ topic: e.target.value })} placeholder="Leave empty to switch alerts off" autoCapitalize="none" autoCorrect="off" spellCheck="false" />
+            <button type="button" className="rset-mini" onClick={makeTopic}>Make one</button>
+            <button type="button" className="rset-mini" disabled={!f.topic.trim() || !topicOk} onClick={sendTest}>Send test</button>
+          </div>
+          <small>Keep it private: anyone who knows it can read these alerts. They contain only the order reference, total and delivery date.</small></div>
+        {testMsg && <p className="rset-note" role="status">{testMsg}</p>}
+        {!topicOk && <p className="rset-warn" role="alert">Use 8 to 64 letters, numbers, dashes or underscores.</p>}
+      </div>
+
       <label className="rset-field rset-wa">WhatsApp group link
         <input type="url" inputMode="url" placeholder="https://chat.whatsapp.com/…" value={f.whatsapp} onChange={e => set({ whatsapp: e.target.value })} />
         <small>Shown as "Join our WhatsApp group" on {r.name}'s pages.</small></label>
       {!waOk && <p className="rset-warn" role="alert">Use a group invite link that starts with https://chat.whatsapp.com/</p>}
 
-      <button className="primary rset-save" disabled={customEmpty || !waOk}>Save for {r.name}</button>
+      <button className="primary rset-save" disabled={customEmpty || !waOk || !topicOk || !minOk}>Save for {r.name}</button>
+    </div>
+  </form>
+}
+
+/* Is the kitchen screen ready to catch orders? Connection, sound and screen-awake at a glance. */
+export function LiveStrip({ live, soundOn, soundReady, onSound, onUnlock, awake, awakeSupported, onAwake }) {
+  return <div className="live-strip" role="status">
+    <span className={live ? 'ls-pill ok' : 'ls-pill bad'}><i aria-hidden="true" />{live ? 'Live' : 'Offline. Reconnecting…'}</span>
+    <button type="button" className={soundOn ? 'ls-chip on' : 'ls-chip'} aria-pressed={soundOn} onClick={onSound}>{soundOn ? 'Sound on' : 'Sound off'}</button>
+    {soundOn && !soundReady && <button type="button" className="ls-chip warn" onClick={onUnlock}>Tap to enable sound</button>}
+    {awakeSupported && <button type="button" className={awake ? 'ls-chip on' : 'ls-chip'} aria-pressed={awake} onClick={onAwake}>{awake ? 'Screen stays on' : 'Screen may sleep'}</button>}
+  </div>
+}
+
+/* Spam limits that apply to BOTH restaurants (a customer's orders are counted across both). 0 = no limit. */
+export function OrderLimitsSettings({ limits, onSave }) {
+  const toForm = () => ({ h: String(limits.per_phone_hour), d: String(limits.per_phone_day), c: String(limits.per_connection_hour) })
+  const [f, setF] = useState(toForm)
+  useEffect(() => { setF(toForm()) }, [limits.per_phone_hour, limits.per_phone_day, limits.per_connection_hour])
+  const valid = (v, max) => /^\d+$/.test(f[v.key]) && Number(f[v.key]) <= max
+  const fields = [
+    { key: 'h', label: 'Orders per phone number, per hour', max: 100, hint: 'Default 3.' },
+    { key: 'd', label: 'Orders per phone number, per day', max: 500, hint: 'Default 8.' },
+    { key: 'c', label: 'Orders per connection, per hour', max: 500, hint: 'Default 20. Stops one device or network sending many orders with different phone numbers.' },
+  ]
+  const ok = fields.every(x => valid(x, x.max))
+  const submit = (e) => { e.preventDefault(); if (ok) onSave({ per_phone_hour: Number(f.h), per_phone_day: Number(f.d), per_connection_hour: Number(f.c) }) }
+  return <form className="panel lset" onSubmit={submit}>
+    <div className="panel-heading"><div><h3>Order limits · both restaurants</h3><p>These stop spam orders. A customer's orders are counted across Salt &amp; Saffron and Oven &amp; Chives together, so one setting covers both.</p></div></div>
+    <div className="rset-body">
+      <div className="rset-row">
+        {fields.map(x => <label className="rset-field" key={x.key}>{x.label}
+          <input inputMode="numeric" value={f[x.key]} onChange={e => setF(cur => ({ ...cur, [x.key]: e.target.value }))} aria-invalid={!valid(x, x.max)} />
+          <small>{x.hint}</small></label>)}
+      </div>
+      {!ok && <p className="lset-warn" role="alert">Use whole numbers: up to 100 per hour per phone, and up to 500 for the others.</p>}
+      <p className="lset-note">0 means no limit. Phone numbers must always be a valid 10-digit mobile number (spaces and +91 are fine). Orders you enter yourself in the dashboard are never limited. Customers only see a plain message when a limit is reached.</p>
+      <button className="primary lset-save" disabled={!ok}>Save order limits</button>
     </div>
   </form>
 }

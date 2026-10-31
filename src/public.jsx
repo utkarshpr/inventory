@@ -185,6 +185,7 @@ function OrderPage({ r, list }) {
   const picked = dishes.filter(d => qty[d.id] > 0)
   const count = picked.reduce((n, d) => n + qty[d.id], 0)
   const total = picked.reduce((sum, d) => sum + Number(d.selling_price) * qty[d.id], 0)
+  const minOrder = Number(r.min_order_value || 0), belowMin = total < minOrder
   const groups = Object.entries(dishes.reduce((acc, d) => { (acc[d.category || 'Menu'] ||= []).push(d); return acc }, {}))
   const step = (id, delta) => setQty(q => ({ ...q, [id]: Math.max(0, Math.min(50, (q[id] || 0) + delta)) }))
   const copyRef = async () => { if (!placed) return; await copyText(placed.ref); setCopied(true); setTimeout(() => setCopied(false), 2000) }
@@ -201,7 +202,8 @@ function OrderPage({ r, list }) {
     if (err) {
       if (/INVALID_DELIVERY_DATE/.test(err.message)) { loadDays(); return setError('That delivery day is no longer available. Please choose another day.') }
       if (/RESTAURANT_CLOSED/.test(err.message)) { setForcedClosed(err.message.replace(/^.*RESTAURANT_CLOSED:\s*/, '')); return }
-      return setError(`Could not place your order: ${err.message}`)
+      const known = /^(INVALID_PHONE|RATE_LIMIT|MIN_ORDER):/.test(err.message)
+      return setError(known ? err.message.replace(/^[A-Z_]+:\s*/, '') : `Could not place your order: ${err.message}`)
     }
     const ref = data.order_number
     setPlaced({ ref, total: Number(data.total), deliveryDate: data.delivery_date, today, items: (data.items || []).filter(i => !String(i.name).startsWith('Note:')) })
@@ -239,6 +241,7 @@ function OrderPage({ r, list }) {
 
           <form id="order-form" onSubmit={submit}>
             <h1 className="c-h1">{placed ? 'Order something else' : 'Choose your dishes'}</h1>
+            {minOrder > 0 && <p className="c-sub c-min">Minimum order {money(minOrder)}.</p>}
             {menu === null && <p className="c-note">Loading the menu…</p>}
             {menuError && <p className="c-note c-note-bad">{menuError}</p>}
             {menu && !menu.length && !menuError && <p className="c-note">No dishes are on today's menu yet. Please check back soon.</p>}
@@ -264,7 +267,7 @@ function OrderPage({ r, list }) {
 
             <h2 className="c-h2 c-cat">Delivery details</h2>
             <label className="c-field"><span>Name</span><input className="c-input" required autoComplete="name" value={name} onChange={e => setName(e.target.value)} /></label>
-            <label className="c-field"><span>Phone number</span><input className="c-input" required type="tel" inputMode="tel" autoComplete="tel" pattern="[0-9+ \-]{7,20}" title="Enter a valid phone number" value={phone} onChange={e => setPhone(e.target.value)} /></label>
+            <label className="c-field"><span>Phone number <small>10-digit mobile</small></span><input className="c-input" required maxLength={16} type="tel" inputMode="tel" autoComplete="tel" pattern="[0-9+ \-]{7,20}" title="Enter a valid phone number" value={phone} onChange={e => setPhone(e.target.value)} /></label>
             <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="House or flat, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
             <fieldset className="c-field c-pay"><legend>Payment</legend>
               <div className="c-chips">{PAYMENTS.map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
@@ -276,7 +279,7 @@ function OrderPage({ r, list }) {
 
     {isOpen && count > 0 && <div className="c-cart">
       <div className="c-cart-sum"><b>{count} item{count === 1 ? '' : 's'}</b><span key={total} className="c-bump">{money(total)}</span></div>
-      <button form="order-form" className="c-cta c-cta-accent customer-submit" disabled={sending || !deliveryDate}>{sending ? 'Placing order…' : 'Place order'}</button>
+      <button form="order-form" className="c-cta c-cta-accent customer-submit" disabled={sending || !deliveryDate || belowMin}>{belowMin ? `Add ${money(minOrder - total)} more` : sending ? 'Placing order…' : 'Place order'}</button>
     </div>}
 
     {dialog && placed && <OrderDialog r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}

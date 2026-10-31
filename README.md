@@ -36,6 +36,19 @@ Orders are listed by delivery date (today first, then upcoming days, then earlie
 
 Each restaurant has its own group link, shown as "Join our WhatsApp group" on its page, its order confirmation and its closed page. Staff can change it in Settings (only `https://chat.whatsapp.com/...` links are accepted).
 
+## Spam protection
+
+`place_order` (the only way customers can order) refuses: phone numbers that are not a valid 10-digit mobile number, more than 3 orders per hour or 8 per day from one phone number, more than 20 orders per hour from one connection (stored only as a hash). These three numbers are the defaults; change them in Settings → Order limits (0 = no limit), and orders below the restaurant's minimum order (Settings).
+Customers see plain messages, never error codes. Staff-made orders are not limited.
+Phone verification by SMS code is possible with Supabase phone login, but it needs an SMS provider and India's DLT registration, so it is not switched on.
+
+## Alerts that do not depend on an open dashboard
+
+- The strip under the restaurant selector shows **Live / Offline**, **Sound**, and **Screen stays on**. The screen is kept awake while the dashboard is open, sound must be unlocked with one tap, an unhandled order repeats its sound every 25 seconds, and after being offline or asleep the dashboard refreshes and alerts for orders it missed.
+- **Phone alerts** (Settings, per restaurant): a free push notification to the owner's phone for every new customer order, even with the dashboard closed. Install the ntfy app, make a topic, subscribe, press Send test, Save. Turn on the `pg_net` extension in Supabase (Database > Extensions) once. The message holds only the reference, total and delivery date. The topic is stored in a staff-only table.
+
+Before launch, follow [SMOKE-TEST.md](./SMOKE-TEST.md).
+
 ## Setup
 
 1. `npm install`

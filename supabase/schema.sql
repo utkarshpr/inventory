@@ -148,6 +148,42 @@ exception when duplicate_object then null; end $$;
 update public.restaurants set whatsapp_url = 'https://chat.whatsapp.com/DGSd2zyxnJJ3vDUPs37OSy?s=cl&p=a&iam=2' where slug = 'salt-and-saffron' and whatsapp_url is null;
 update public.restaurants set whatsapp_url = 'https://chat.whatsapp.com/G4GsNiGEmGlIwk1EbcFiRM' where slug = 'oven-and-chives' and whatsapp_url is null;
 
+-- Spam protection: a minimum order per restaurant, and the customer's phone / hashed network address for limits
+alter table public.restaurants add column if not exists min_order_value numeric(10,2) not null default 0;
+do $$ begin
+  alter table public.restaurants add constraint restaurants_min_order_check check (min_order_value >= 0);
+exception when duplicate_object then null; end $$;
+alter table public.orders add column if not exists customer_phone text;   -- digits only (last 10)
+alter table public.orders add column if not exists client_hash text;      -- md5 of the customer's network address, never the address itself
+create index if not exists orders_phone_idx on public.orders (customer_phone, created_at desc) where customer_phone is not null;
+create index if not exists orders_client_idx on public.orders (client_hash, created_at desc) where client_hash is not null;
+
+-- Order limits shared by both restaurants (they count a customer's orders across both). 0 = no limit.
+create table if not exists public.order_limits (
+  id boolean primary key default true check (id),
+  per_phone_hour int not null default 3 check (per_phone_hour between 0 and 100),
+  per_phone_day int not null default 8 check (per_phone_day between 0 and 500),
+  per_connection_hour int not null default 20 check (per_connection_hour between 0 and 500)
+);
+insert into public.order_limits (id) values (true) on conflict (id) do nothing;
+alter table public.order_limits enable row level security;
+drop policy if exists "Staff can manage order limits" on public.order_limits;
+create policy "Staff can manage order limits" on public.order_limits
+  for all to authenticated using (true) with check (true);
+
+-- Private per-restaurant settings. Staff only: the phone-alert topic is a secret, so it must not live in the public restaurants table.
+create table if not exists public.restaurant_secrets (
+  restaurant_id uuid primary key references public.restaurants(id) on delete cascade,
+  alert_topic text
+);
+do $$ begin
+  alter table public.restaurant_secrets add constraint restaurant_secrets_topic_check check (alert_topic is null or alert_topic ~ '^[A-Za-z0-9_-]{8,64}$');
+exception when duplicate_object then null; end $$;
+alter table public.restaurant_secrets enable row level security;
+drop policy if exists "Staff can manage restaurant secrets" on public.restaurant_secrets;
+create policy "Staff can manage restaurant secrets" on public.restaurant_secrets
+  for all to authenticated using (true) with check (true);
+
 -- The delivery days a customer may choose right now (single source of truth: the app and place_order both use it)
 create or replace function public.delivery_dates(p_restaurant uuid, p_from timestamptz default now())
 returns date[]
@@ -242,6 +278,8 @@ create or replace function public.place_order(
 language plpgsql security definer set search_path = public as $$
 declare
   rest record; it jsonb; rc record; qty int;
+  v_phone text; v_ip text; v_hash text; n int;
+  v_ph int; v_pd int; v_ch int;
   total numeric := 0;
   lines jsonb := '[]'::jsonb;
   num text; tries int := 0;
@@ -260,6 +298,28 @@ begin
   if p_payment not in ('Cash on delivery', 'UPI', 'Card on delivery', 'Bank transfer') then
     raise exception 'Invalid payment method';
   end if;
+
+  -- Phone: a real 10-digit mobile number (spaces, +91 and dashes are fine)
+  v_phone := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
+  if length(v_phone) > 10 then v_phone := right(v_phone, 10); end if;
+  if length(v_phone) <> 10 or v_phone !~ '^[6-9]' then
+    raise exception 'INVALID_PHONE: Enter a valid 10-digit mobile number';
+  end if;
+  -- Limits per phone number (all restaurants together) and per network address
+  select coalesce(max(per_phone_hour), 3), coalesce(max(per_phone_day), 8), coalesce(max(per_connection_hour), 20) into v_ph, v_pd, v_ch from public.order_limits;
+  select count(*) into n from public.orders where customer_phone = v_phone and created_at > now() - interval '1 hour';
+  if v_ph > 0 and n >= v_ph then raise exception 'RATE_LIMIT: Too many orders from this phone number. Please try again in a little while, or call the kitchen.'; end if;
+  select count(*) into n from public.orders where customer_phone = v_phone and created_at > now() - interval '24 hours';
+  if v_pd > 0 and n >= v_pd then raise exception 'RATE_LIMIT: Too many orders from this phone number today. Please call the kitchen.'; end if;
+  begin
+    v_ip := nullif(trim(split_part(coalesce((nullif(current_setting('request.headers', true), ''))::json ->> 'x-forwarded-for', ''), ',', 1)), '');
+  exception when others then v_ip := null; end;
+  if v_ip is not null then
+    v_hash := md5(v_ip);
+    select count(*) into n from public.orders where client_hash = v_hash and created_at > now() - interval '1 hour';
+    if v_ch > 0 and n >= v_ch then raise exception 'RATE_LIMIT: Too many orders from this connection. Please try again later, or call the kitchen.'; end if;
+  end if;
+
   if p_delivery_date is null or not (p_delivery_date = any(public.delivery_dates(rest.id))) then
     raise exception 'INVALID_DELIVERY_DATE: Please choose one of the available delivery days';
   end if;
@@ -281,6 +341,10 @@ begin
       jsonb_build_object('name', rc.name, 'quantity', qty, 'price', rc.selling_price));
   end loop;
 
+  if total < rest.min_order_value then
+    raise exception 'MIN_ORDER: The minimum order is ₹%', trim_scale(rest.min_order_value);
+  end if;
+
   if coalesce(trim(p_notes), '') <> '' then
     lines := lines || jsonb_build_array(
       jsonb_build_object('name', 'Note: ' || trim(p_notes), 'quantity', 1, 'price', 0));
@@ -289,8 +353,8 @@ begin
   loop
     num := rest.order_prefix || '-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
     begin
-      insert into public.orders (restaurant_id, order_number, customer_name, channel, status, total, items, delivery_address, delivery_date, payment_method)
-      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment);
+      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method)
+      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment);
       exit;
     exception when unique_violation then
       tries := tries + 1;
@@ -401,6 +465,46 @@ drop trigger if exists orders_inventory on public.orders;
 create trigger orders_inventory
   after insert or update of status on public.orders
   for each row execute function public.orders_inventory_trigger();
+
+-- ============================================================
+-- 5b. Phone alert to the owner for every NEW CUSTOMER order, even when no dashboard is open.
+--     Off until a restaurant has an alert topic (Settings > Phone alerts). Uses the free ntfy.sh service.
+--     The message carries only the reference, total and delivery date, never customer details.
+-- ============================================================
+do $$ begin
+  create extension if not exists pg_net with schema extensions;
+exception when others then
+  raise notice 'pg_net could not be enabled here. Turn it on under Database > Extensions to use phone alerts.';
+end $$;
+
+create or replace function public.notify_owner()
+returns trigger
+language plpgsql security definer set search_path = public, extensions as $$
+declare r record; t text;
+begin
+  if new.channel <> 'Customer form' then return new; end if;
+  select s.alert_topic, x.name into r
+    from public.restaurants x left join public.restaurant_secrets s on s.restaurant_id = x.id
+   where x.id = new.restaurant_id;
+  if r.alert_topic is null then return new; end if;
+  begin
+    perform net.http_post(
+      url := 'https://ntfy.sh/',
+      body := jsonb_build_object(
+        'topic', r.alert_topic,
+        'title', r.name || ': new order',
+        'message', new.order_number || ' · ₹' || trim_scale(new.total)::text || ' · delivery ' || new.delivery_date::text,
+        'priority', 4, 'tags', jsonb_build_array('bell')));
+  exception when others then
+    raise warning 'owner alert skipped: %', sqlerrm;   -- never block an order because an alert failed
+  end;
+  return new;
+end $$;
+revoke all on function public.notify_owner() from public, anon, authenticated;
+
+drop trigger if exists orders_notify_owner on public.orders;
+create trigger orders_notify_owner after insert on public.orders
+  for each row execute function public.notify_owner();
 
 -- ============================================================
 -- 6. Realtime (instant orders and stock in the kitchen dashboard)
