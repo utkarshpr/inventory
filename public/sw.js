@@ -3,6 +3,9 @@
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 
+/* Some Chrome versions only offer "Install app" when a fetch handler exists. This one passes everything straight to the network. */
+self.addEventListener('fetch', () => {})
+
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
   const url = (e.notification.data && e.notification.data.url) || '/'
