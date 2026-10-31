@@ -1,0 +1,128 @@
+/* Staff dashboard: Salt&Saffron palette + phone layout. Loads after styles.css. */
+:root{
+  --ink:#2B1230;--muted:#675D6C;--line:#E0E1DA;--paper:#FFFFFF;--cream:#F2F3EF;
+  --peach:#FFE7A8;--coral:#E39A00;--green:#2D7A4F;--mauve:#7A4D7F;
+}
+.mobile-only{display:none}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transparent}
+
+/* palette */
+.sidebar{background:#2B1230}
+.nav{color:#D2C4D5}
+.nav:hover,.nav.active{background:#44244C;color:#fff}
+.nav.active{box-shadow:inset 3px 0 #F7A800}
+.nav em{background:#F7A800;color:#2B1230}
+.salt-brand .accent,.accent{color:#F7A800}
+.workspace{border-color:#5A3A62}
+.profile{border-top-color:#5A3A62}
+.primary{background:#2B1230;color:#fff}
+.primary:hover{background:#44244C}
+.hero{background:#F7A800}
+.hero-kicker{color:#2B1230}
+.hero p{color:#3A2210}
+.hero button{background:#2B1230}
+.hero-doodles{color:#2B1230}
+.hero-doodles strong{color:#B97800}
+.round-add{background:#FFE7A8;color:#6B3F00}
+.text-btn,.edit-order,.insight button,.insight b+p+button{color:#8A5200}
+.tabs b,.tab.active-tab{border-bottom-color:#F7A800}
+.tab.active-tab{color:#2B1230}
+.bar i,.progress i{background:#F7A800}
+.recipe-line.selected{background:#FFF3D1}
+.today-menu{background:#FFF1CC}
+.menu-dish{background:#fff;border-color:#F0D58A}
+.view-order-link{border-color:#D9A640;color:#6B3F00;background:#FFF9E8}
+.status.new{background:#FFE2A0;color:#6B4300}
+.stat span{color:#8A5200;background:#FFF1CC}
+.stat span.green{color:#2D7A4F;background:#E8F4EC}
+.cost-banner{background:#F6F0E3}
+.coral{background:#F2A21B}.olive{background:#8FA861}.violet{background:#8B6A99}
+.ingredient span,.step span{color:#8A5200}
+.step span{background:#FFE7A8}
+.amber{background:#FFF1CC}.lilac{background:#EFE6F1}
+.today-menu .eyebrow{color:#7A5A12}
+.edit-order{font-size:12px}
+
+/* ---- phone (staff) ---- */
+@media(max-width:760px){
+  input,select,textarea{font-size:16px!important}  /* stops iPhone zooming on focus */
+  .app-shell main{padding:calc(16px + env(safe-area-inset-top)) 16px calc(100px + env(safe-area-inset-bottom))}
+  .app-shell header{display:flex;flex-direction:row;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:16px}
+  .app-shell h1{font-size:28px;line-height:1.05}
+  .app-shell .header-actions{display:flex;gap:6px;align-items:center;flex:0 0 auto}
+  .app-shell .header-actions .icon-btn{display:grid;width:44px;height:44px}
+  .app-shell .header-actions .desktop-only{display:none}
+  .mobile-only{display:grid}
+
+  /* bottom navigation: icon + label */
+  .app-shell .sidebar{height:calc(66px + env(safe-area-inset-bottom));padding:4px 6px calc(4px + env(safe-area-inset-bottom));background:#2B1230;border-top:0}
+  .app-shell .sidebar .nav{font-size:11px;font-weight:600;flex-direction:column;gap:3px;padding:6px 2px;min-height:54px;color:#D2C4D5;position:relative;letter-spacing:0}
+  .app-shell .sidebar .nav svg{width:22px;height:22px}
+  .app-shell .sidebar .nav.active{background:transparent;color:#F7A800;box-shadow:none}
+  .app-shell .sidebar .nav.active::before{content:'';position:absolute;top:-4px;left:25%;right:25%;height:3px;border-radius:0 0 3px 3px;background:#F7A800}
+  .app-shell .sidebar .nav em{display:block;position:absolute;top:2px;left:calc(50% + 6px);font-size:10px;padding:1px 5px;margin:0}
+
+  /* "New order" becomes a compact + in the header (nothing floats over the order buttons) */
+  .app-shell .header-actions .primary{order:-1;font-size:0;gap:0;width:44px;height:44px;min-height:44px;padding:0;justify-content:center;border-radius:12px;background:#F7A800;color:#2B1230}
+  .app-shell .header-actions .primary svg{display:block;width:24px;height:24px}
+  .app-shell[data-page="Recipes"] .header-actions .primary,
+  .app-shell[data-page="Inventory"] .header-actions .primary,
+  .app-shell[data-page="Reports"] .header-actions .primary,
+  .app-shell[data-page="Settings"] .header-actions .primary{display:none}
+
+  /* today's menu: swipeable chips instead of a tall block */
+  .app-shell .today-menu{padding:16px;margin:0 0 18px}
+  .app-shell .today-menu-head>div>p:not(.eyebrow){display:none}
+  .app-shell .today-menu h2{font-size:22px}
+  .app-shell .menu-board{display:flex;grid-template-columns:none;gap:8px;overflow-x:auto;margin:14px -16px 0;padding:0 16px 6px;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch}
+  .app-shell .menu-dish{flex:0 0 72%;scroll-snap-align:start;padding:10px}
+  .app-shell .menu-dish b{font-size:14px}
+  .app-shell .menu-dish small{font-size:12px}
+  .app-shell .menu-dish button{min-height:36px;padding:0 12px;font-size:12px;border-radius:9px}
+  .app-shell .menu-count{display:block;margin-top:8px}
+
+  /* filters + search */
+  .app-shell .tabs{gap:6px;width:100%;overflow-x:auto}
+  .app-shell .tab{min-height:44px;padding:0 12px 6px;font-size:14px}
+  .app-shell .filters{width:100%;margin:0;display:grid;grid-template-columns:1fr 1fr}
+  .app-shell .filters select{min-height:46px;font-size:15px!important;border-radius:10px}
+  .app-shell .search{min-height:46px;border-radius:10px}
+
+  /* orders as cards */
+  .app-shell .order-row,.app-shell .full-orders .order-row{display:grid;grid-template-columns:1fr auto;grid-template-areas:"person total" "items items" "status actions";gap:10px 12px;align-items:center;padding:16px}
+  .app-shell .order-row .avatar{display:none}
+  .app-shell .order-row .order-person{grid-area:person;min-width:0}
+  .app-shell .order-row .order-person b{font-size:16px}
+  .app-shell .order-row .order-person span{font-size:12px}
+  .app-shell .order-row .order-total,.app-shell .full-orders .order-row .order-total{grid-area:total;display:block!important;text-align:right;font-size:17px}
+  .app-shell .order-row .order-total span{font-size:11px}
+  .app-shell .order-row .order-items{grid-area:items;display:block!important;white-space:normal;overflow:visible;text-overflow:clip;font-size:14px;line-height:1.4;color:#3F3344}
+  .app-shell .order-row .order-meta{font-size:12.5px;margin-top:6px}
+  .app-shell .order-row .status-select{grid-area:status;justify-self:start;min-height:42px;padding:0 16px;border-radius:10px;font-size:14px!important;font-weight:700}
+  .app-shell .order-row .row-actions{grid-area:actions;justify-self:end;flex-direction:row;gap:4px}
+  .app-shell .order-row .row-actions .edit-order{min-height:42px;min-width:56px;padding:0 10px;border-radius:10px;font-size:14px;background:#F6F1E4;color:#6B3F00}
+
+  /* sheets instead of centred dialogs */
+  .modal-backdrop{align-items:end;padding:0;z-index:40}
+  .modal{width:100%;max-width:none;max-height:92vh;max-height:92dvh;overflow-y:auto;border-radius:22px 22px 0 0;padding:24px 18px calc(24px + env(safe-area-inset-bottom))}
+  .modal-close{width:44px;height:44px;right:8px;top:8px;display:grid;place-items:center}
+  .modal input,.modal select,.modal textarea{padding:12px}
+  .modal .primary,.modal .submit{min-height:52px;font-size:16px;border-radius:12px}
+  .line-item input,.line-item select{min-height:46px}
+  .modal .two{grid-template-columns:1fr 1fr}
+
+  /* toast sits above the bottom bar */
+  .app-shell .toast{left:16px;right:16px;bottom:calc(84px + env(safe-area-inset-bottom));text-align:left;z-index:50}
+
+  /* data pages */
+  .app-shell .stats{grid-template-columns:1fr 1fr}
+  .app-shell .recipe-line{min-height:56px}
+  .app-shell .inventory-row{padding:14px 16px}
+  .app-shell .inventory-row .inv-status{justify-content:space-between}
+  .app-shell .inventory-row .edit-order{min-height:40px;padding:0 10px}
+  .app-shell .report-stats{grid-template-columns:1fr 1fr}
+  .app-shell .panel-heading{padding:16px}
+}
+
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
