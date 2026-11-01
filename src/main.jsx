@@ -382,16 +382,25 @@ function App() {
     if (supabase) { const { error } = await supabase.from('recipes').update({ sold_out_date: date }).eq('id', recipe.id); if (error) return notify(`Could not update: ${error.message}`) }
     patchRecipe(recipe.id, { soldOutDate: date || '' }); notify(date ? `${recipe.name} is sold out for today` : `${recipe.name} is available again`)
   }
-  const shrinkImage = (file) => new Promise((resolve, reject) => {   // phone photos are huge: resize to 800px and compress before uploading
-    const url = URL.createObjectURL(file), img = new Image()
-    img.onload = () => { const s = Math.min(1, 800 / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.round(img.width * s); c.height = Math.round(img.height * s); c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); c.toBlob(b => b ? resolve(b) : reject(new Error('Could not read that image')), 'image/jpeg', 0.8) }
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('That file is not an image')) }
-    img.src = url
-  })
+  const shrinkImage = async (file) => {   // phone photos are huge: resize to 800px and compress before uploading
+    const draw = (src, w, h) => new Promise((resolve, reject) => {
+      const s = Math.min(1, 800 / Math.max(w, h)), c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * s)); c.height = Math.max(1, Math.round(h * s))
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(src, 0, 0, c.width, c.height)
+      c.toBlob(b => b ? resolve(b) : reject(new Error('Could not process that photo')), 'image/jpeg', 0.82)
+    })
+    if (window.createImageBitmap) { try { const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); const out = await draw(bmp, bmp.width, bmp.height); if (bmp.close) bmp.close(); return out } catch { /* try the older way below */ } }
+    const url = URL.createObjectURL(file)
+    try {
+      const img = await new Promise((resolve, reject) => { const i = new Image(); i.onload = () => resolve(i); i.onerror = () => reject(new Error('NODECODE')); i.src = url })
+      return await draw(img, img.naturalWidth || img.width, img.naturalHeight || img.height)
+    } catch (e) {
+      throw new Error(/heic|heif/i.test(`${file.type} ${file.name}`) ? 'This browser cannot read HEIC photos. On iPhone use Safari, or choose a JPG/PNG (Settings → Camera → Formats → Most Compatible).' : 'This browser could not read that photo. Try a JPG or PNG.')
+    } finally { URL.revokeObjectURL(url) }
+  }
   const dishPhotoPath = (url) => { const m = (url || '').match(/\/dish-photos\/(.+)$/); return m ? decodeURIComponent(m[1]) : null }
   const uploadPhoto = async (recipe, file) => {
     if (!file) return
-    if (!/^image\//.test(file.type)) return notify('Please choose a photo')
+    if (file.type && !/^image\//.test(file.type)) return notify('Please choose a photo')
     if (!supabase) return notify('Photos need Supabase')
     try {
       const blob = await shrinkImage(file), path = `${active.id}/${recipe.id}-${Date.now()}.jpg`

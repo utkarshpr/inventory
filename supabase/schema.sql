@@ -81,7 +81,6 @@ create or replace function public.default_restaurant_id() returns uuid
 language sql stable as $$ select id from public.restaurants where slug = 'salt-and-saffron' $$;
 
 alter table public.restaurants      add column if not exists location text;
-update public.restaurants set location = 'Pune' where location is null and slug in ('salt-and-saffron', 'oven-and-chives');
 alter table public.orders           add column if not exists restaurant_id uuid references public.restaurants(id);
 alter table public.recipes          add column if not exists restaurant_id uuid references public.restaurants(id);
 alter table public.inventory_items  add column if not exists restaurant_id uuid references public.restaurants(id);
