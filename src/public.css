@@ -454,3 +454,18 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-rated{margin:12px 0 0;font-size:14px}
 .c-app .c-rated-stars{color:#E2A21B;letter-spacing:2px}
 .c-app .c-eta{font-weight:700}
+
+/* Order page: photo cards in two columns (design A) */
+.c-app ul.c-menu{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border-top:0}
+.c-app ul.c-menu .c-dish,.c-app ul.c-menu .c-dish.on{display:flex;flex-direction:column;align-items:stretch;flex-wrap:nowrap;gap:0;margin:0;padding:0;border:1px solid var(--c-line);border-radius:20px;background:var(--c-surface);overflow:hidden;box-shadow:none}
+.c-app ul.c-menu .c-dish.on{border-color:var(--c-accent-solid);box-shadow:0 0 0 1.5px var(--c-accent-solid)}
+.c-app ul.c-menu .c-dish-photo{width:100%;height:auto;aspect-ratio:4/3;margin:0;border-radius:0;box-shadow:none;object-fit:cover}
+.c-app ul.c-menu .c-dish-ph{display:grid;place-items:center;background:linear-gradient(135deg,color-mix(in srgb,var(--c-accent-solid) 28%,var(--c-surface)),color-mix(in srgb,var(--c-accent-solid) 10%,var(--c-surface)))}
+.c-app ul.c-menu .c-dish-ph span{font-size:38px;font-weight:800;color:var(--c-accent-solid);opacity:.55}
+.c-app ul.c-menu .c-dish-main{padding:10px 12px 6px;flex:1}
+.c-app ul.c-menu .c-dish-name{font-size:16px}
+.c-app ul.c-menu .c-dish-price{font-size:14px}
+.c-app ul.c-menu .c-qty{padding:4px 12px 12px;justify-content:space-between}
+.c-app ul.c-menu .c-add{width:100%;min-width:0}
+.c-app ul.c-menu .c-subline{padding:6px 12px 10px;flex-basis:auto;border-top:1px dashed var(--c-line)}
+.c-app ul.c-menu .c-dish.sold .c-qty{display:none}

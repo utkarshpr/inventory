@@ -398,7 +398,7 @@ function OrderPage({ r, list }) {
                 const out = soldOut(d) || left === 0
                 const sub = picked.filter(l => l.dish.id === d.id && hasOpts)
                 return <li key={d.id} className={n || sub.length ? 'c-dish on' : out ? 'c-dish sold' : 'c-dish'}>
-                  {d.image_url && <img className="c-dish-photo" src={d.image_url} alt="" loading="lazy" width="64" height="64" />}
+                  {d.image_url ? <img className="c-dish-photo" src={d.image_url} alt="" loading="lazy" width="160" height="120" /> : <div className="c-dish-photo c-dish-ph" aria-hidden="true"><span>{(d.name || '?').trim().charAt(0).toUpperCase()}</span></div>}
                   <div className="c-dish-main"><span className="c-dish-name">{d.name}</span><span className="c-dish-price">{hasHalf(d) ? `Full ${money(d.selling_price)} · Half ${money(halfPrice(d))}` : <>{hasOpts ? 'from ' : ''}{money(d.selling_price)}</>}</span>{soldOut(d) ? <span className="c-soldout">Sold out today</span> : left === 0 ? <span className="c-soldout">Sold out for this day</span> : left != null && left <= 5 ? <span className="c-left">Only {left} left</span> : null}</div>
                   <div className="c-qty">{out ? null : (n === 0 || hasOpts)
                     ? <button type="button" className="c-add" onClick={() => addDish(d)} aria-label={`Add ${d.name}`} disabled={!canAdd(d)}>Add</button>
