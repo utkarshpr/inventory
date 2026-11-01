@@ -476,3 +476,38 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-opt-x .c-qty{gap:6px}
 .c-app .c-opt-x .c-step{width:36px;height:36px}
 .c-app .c-opt-x .c-n{min-width:20px;text-align:center;font-weight:700}
+
+/* Your orders (several at once) */
+.c-app .c-mine{margin:0 0 22px}
+.c-app .c-mine-card{margin:12px 0;padding:14px 16px;border-radius:18px;background:var(--c-surface);border:1px solid var(--c-line)}
+.c-app .c-mine-card.new{border-color:var(--c-accent-solid);box-shadow:0 0 0 1.5px var(--c-accent-solid)}
+.c-app .c-mine-card.off{opacity:.7}
+.c-app .c-mine-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.c-app .c-mine-status{margin-left:auto;font-size:13px;font-weight:700;padding:4px 10px;border-radius:999px;background:color-mix(in srgb,var(--c-accent-solid) 16%,transparent)}
+.c-app .c-mine-total{font-weight:800;border-top:1px dashed var(--c-line);padding-top:6px}
+.c-app .c-mine-wait span:last-child{color:var(--c-muted);font-style:italic}
+.c-app .c-mine-more{margin-top:8px}
+.c-app .c-mine-head .c-ref{font-size:16px;padding:6px 10px;letter-spacing:.02em;background:none;border:1px solid var(--c-line);color:var(--c-ink);border-radius:10px}
+.c-app .c-mine-head .c-btn{min-height:36px;padding:0 12px;font-size:14px}
+
+.c-app .c-mine-card{display:none}
+.c-app .c-mine-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:10px}
+.c-app .c-mine-row{display:flex;align-items:center;gap:10px;width:100%;padding:14px 16px;border-radius:18px;background:var(--c-surface);border:1px solid var(--c-line);color:var(--c-ink);font:inherit;text-align:left;cursor:pointer}
+.c-app .c-mine-row.new{border-color:var(--c-accent-solid);box-shadow:0 0 0 1.5px var(--c-accent-solid)}
+.c-app .c-mine-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.c-app .c-mine-main b{font-size:16px;letter-spacing:.02em}
+.c-app .c-mine-main small{font-size:14px;color:var(--c-muted)}
+.c-app .c-mine-status.off{background:color-mix(in srgb,var(--c-chilli) 16%,transparent)}
+.c-app .c-mine-status.big{display:inline-block;margin:6px 0}
+.c-app .c-mine-go{font-size:22px;color:var(--c-muted)}
+.c-app .c-mine-pages{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:14px}
+.c-app .c-mine-dialog{max-height:88vh;overflow:auto}
+.c-app .c-mine-dialog .c-dlg-paywait{display:block;margin:10px auto 0;width:fit-content}
+.c-app .c-mine-dialog .c-mine-more{display:block;margin:10px auto 14px}
+
+/* Menu / My orders tabs */
+.c-app .c-tabs{display:flex;gap:6px;margin:0 0 18px;padding:5px;border-radius:999px;background:var(--c-surface);border:1px solid var(--c-line)}
+.c-app .c-tab{flex:1;min-height:44px;border:0;border-radius:999px;background:transparent;color:var(--c-ink);font:inherit;font-weight:700;font-size:16px;cursor:pointer}
+.c-app .c-tab.on{background:var(--c-btn);color:var(--c-btn-ink)}
+.c-app .c-mine-back{margin:14px 0 0;width:100%}
+.c-app form[hidden]{display:none}

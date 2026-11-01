@@ -153,3 +153,18 @@ The ntfy topic in Settings keeps working as a separate backup.
 - **Payments** page has status filters: All / Not paid / Waiting for check / Paid.
 
 After updating: run `supabase/schema.sql` (safe to run twice), enable `pg_cron` under Database → Extensions and run it again, then redeploy `send-push` with Verify JWT off.
+
+## Customer order page: Menu and My orders
+
+- The order page has two tabs. **Menu** is for adding dishes (photo cards, sizes, extras with a quantity) and placing the order. **My orders** is for tracking.
+- **Sign in with a mobile number only** (no OTP): My orders lists that number's orders, newest first, 4 per page. Tap one to open a popup with items, quantities, prices, delivery charge and total. It updates by itself when the kitchen adds the delivery charge or confirms payment, and a UPI order shows its QR code there once the charge is set. Customers are signed in automatically after they order. "Not you? Sign out" clears it.
+- A phone number is not a password. Anyone who knows a number can see that number's orders (no names or addresses). If you ever need real privacy, add an OTP.
+- Customers can keep ordering while the kitchen sets the delivery charge. Nothing waits or blocks.
+
+## Admin lists: 10 per page
+
+Orders, Payments, To cook, Customers, Recipes, Inventory, Coupons and Team all show 10 rows per page with Previous / Next.
+
+## Database indexes
+
+Section 12 of `supabase/schema.sql` adds indexes for the common lookups (orders by restaurant/status/phone/delivery day, unpaid UPI, recipes, inventory, ingredients, coupons, push subscriptions). Run the schema again to apply them; running it twice is safe.

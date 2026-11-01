@@ -580,7 +580,8 @@ language sql security definer set search_path = public stable as $$
                     and o.delivery_date = (now() at time zone coalesce(r.timezone, 'Asia/Kolkata'))::date
                    then coalesce(o.cooking_at, o.payment_confirmed_at, o.created_at) + make_interval(mins => r.prep_minutes) end,
     'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
+    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'payment', o.payment_method, 'discount', o.discount, 'coupon', o.coupon_code, 'lines', (select coalesce(jsonb_agg(jsonb_build_object('name', x->>'name', 'quantity', coalesce(x->'quantity', '1'::jsonb), 'price', x->'price', 'options', x->'options')), '[]'::jsonb) from jsonb_array_elements(case when jsonb_typeof(o.items) = 'array' then o.items else '[]'::jsonb end) x where jsonb_typeof(x) = 'object' and (x->>'name') not like 'Note:%'),
+    'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
   from public.orders o join public.restaurants r on r.id = o.restaurant_id
   where o.order_number = upper(trim(p_order_number))
   limit 1;
@@ -595,7 +596,7 @@ begin
   select count(*) into v_total from public.orders where customer_phone = v_phone;
   select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
     select jsonb_build_object('rating', o.rating, 'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
+      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'delivery_fee_pending', o.delivery_fee_pending, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
     from public.orders o join public.restaurants r on r.id = o.restaurant_id
     where o.customer_phone = v_phone order by o.created_at desc limit v_lim offset v_off) s;
   return jsonb_build_object('total', v_total, 'limit', v_lim, 'offset', v_off, 'orders', v_rows);
@@ -1171,3 +1172,23 @@ begin
 end $$;
 revoke all on function public.set_delivery_charge(text, numeric) from public, anon;
 grant execute on function public.set_delivery_charge(text, numeric) to authenticated;
+
+-- ============================================================
+-- 12. Indexes for speed (safe to run again; they only help reads)
+-- ============================================================
+-- Orders: the staff list by status, the Payments page, the unpaid-UPI check, customers, the daily summary
+create index if not exists orders_status_idx        on public.orders (restaurant_id, status, created_at desc);
+create index if not exists orders_delivery_status_idx on public.orders (restaurant_id, delivery_date, status);
+create index if not exists orders_unpaid_upi_idx    on public.orders (created_at) where payment_status = 'pending';
+create index if not exists orders_customer_idx      on public.orders (restaurant_id, customer_phone) where customer_phone is not null;
+create index if not exists orders_created_idx       on public.orders (created_at desc);
+-- Menu and stock: dishes by restaurant and published state, name matching for stock deduction
+create index if not exists recipes_published_idx    on public.recipes (restaurant_id, is_published);
+create index if not exists recipes_name_idx         on public.recipes (restaurant_id, lower(name));
+create index if not exists inventory_name_idx       on public.inventory_items (restaurant_id, lower(name));
+create index if not exists recipe_ingredients_recipe_idx on public.recipe_ingredients (recipe_id);
+create index if not exists recipe_ingredients_item_idx   on public.recipe_ingredients (inventory_item_id) where inventory_item_id is not null;
+-- Coupons and alerts
+create index if not exists coupons_restaurant_idx   on public.coupons (restaurant_id);
+create index if not exists push_subs_restaurant_idx on public.push_subscriptions (restaurant_id);
+analyze public.orders; analyze public.recipes; analyze public.inventory_items; analyze public.recipe_ingredients;

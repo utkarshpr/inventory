@@ -500,3 +500,7 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .team-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;border:1px solid var(--line,#3a3a3a)}
 .team-row b{display:block}
 .team-row small{display:block;color:var(--muted);font-size:13px;line-height:1.4;margin-top:2px}
+
+.pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 4px;font-size:14px;color:var(--muted,#6f5a4a)}
+.pager .app-btn{min-height:40px;padding:0 14px}
+.pager .app-btn:disabled{opacity:.45}

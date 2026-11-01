@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { supabase } from './supabase'
 import { useRestaurants, themeStyle, Mark, zonedNow, addDaysIso, dayLabel, dateText, deliveryText } from './restaurants'
-import { RestaurantSwitcher, OpenToggle, OrderAlerts, RestaurantSettings, LiveStrip, OrderLimitsSettings, AppInstallCard, systemNotify, GoalCard, CouponsSettings, BackupCard, TeamCard } from './staffparts'
+import { RestaurantSwitcher, OpenToggle, OrderAlerts, RestaurantSettings, LiveStrip, OrderLimitsSettings, AppInstallCard, systemNotify, GoalCard, CouponsSettings, BackupCard, TeamCard, usePaged, Pager } from './staffparts'
 import './styles.css'
 import './staff.css'
 import { PublicRouter, AdminLogin, copyText } from './public'
@@ -497,17 +497,18 @@ function App() {
 }
 
 const Stat=({label,value,change,good,note='vs. yesterday'})=><div className="stat"><p>{label}</p><div><strong>{value}</strong><span className={good?'green':''}>{change}</span></div><small>{note}</small></div>
-function OrderTable({orders,onStatus,onEdit,formatItems,highlight,today,grouped,rname,onPay,onCharge,distance}) {
+function OrderTable({orders: allOrders,onStatus,onEdit,formatItems,highlight,today,grouped,rname,onPay,onCharge,distance}) {
+  const pg = usePaged(allOrders, 10, allOrders.length + ':' + (allOrders[allOrders.length - 1] || {}).id), orders = pg.items
   const rows = []; let last = null
   orders.forEach(o => {
     const dk = deliveryKey(o)
     if (grouped && dk !== last) {
-      last = dk; const n = orders.filter(x => deliveryKey(x) === dk).length, rel = dayLabel(dk, today), abs = dateText(dk)
+      last = dk; const n = allOrders.filter(x => deliveryKey(x) === dk).length, rel = dayLabel(dk, today), abs = dateText(dk)
       rows.push(<div className="day-head" key={'head-' + dk}><b>{rel}</b>{rel !== abs && <span>{abs}</span>}<em>{n} order{n === 1 ? '' : 's'}</em></div>)
     }
     rows.push(<div className={o.id === highlight ? 'order-row flash' : 'order-row'} key={o.id}><div className="avatar">{o.avatar}</div><div className="order-person"><b>{o.customer}</b><span>{o.id} · {o.channel}</span>{o.paymentStatus === 'pending' && o.status !== 'Cancelled' && <span className={o.paymentClaimedAt ? 'pay-tag verify' : 'pay-tag'}>{o.paymentClaimedAt ? `UPI · verify payment${o.paymentTxn ? ' · txn ' + o.paymentTxn : ''}` : o.paymentRejectReason ? `UPI · payment rejected: ${o.paymentRejectReason}` : 'UPI · payment pending'}</span>}{o.paymentStatus === 'received' && <span className="pay-tag ok">UPI · paid</span>}{o.deliveryFeePending && o.status !== 'Cancelled' && <span className="pay-tag verify">Delivery charge needed</span>}{!o.deliveryFeePending && o.deliveryFee > 0 && <span className="pay-tag">Delivery ₹{o.deliveryFee}</span>}{o.rating > 0 && <span className="pay-tag ok">★ {o.rating}{o.ratingComment ? ` · ${o.ratingComment}` : ''}</span>}{o.status === 'Cancelled' && o.cancelReason && <span className="cancel-why">Reason: {o.cancelReason}</span>}</div><div className="order-items"><div>{formatItems(o.items)}</div><small className="order-meta"><span className="om-date">🗓 {deliveryText(dk, today)}</span>{o.address && <span className="om-addr">📍 <span className="om-text">{o.address}</span> <CopyButton text={o.address} label="Copy" aria="Copy address"/></span>}{o.payment && <span>💳 {o.payment}</span>}</small></div><div className="order-total">₹{o.total}<span>{o.placed || o.time}</span></div><select className={`status status-select ${o.status.toLowerCase()}`} aria-label={`Status for ${o.id}`} value={o.status} onChange={e=>onStatus(o.id,e.target.value)}>{['New','Cooking','Ready','Delivered','Cancelled'].map(status=><option key={status}>{status}</option>)}</select><div className="row-actions">{o.deliveryFeePending && o.status !== 'Cancelled' && <button className="edit-order pay-confirm" onClick={() => onCharge(o)}>Set delivery charge</button>}{!o.deliveryFeePending && distance && !['Delivered', 'Cancelled'].includes(o.status) && <button className="edit-order" onClick={() => onCharge(o)}>Change charge</button>}{o.paymentStatus === 'pending' && o.status !== 'Cancelled' && <button className="edit-order pay-confirm" onClick={() => onPay(o)}>{o.paymentClaimedAt ? 'Verify payment' : 'Confirm payment'}</button>}<button className="edit-order" onClick={() => onEdit(o)}>Open</button><button className="edit-order" onClick={() => printTicket(o)}>Print</button>{whatsappLink(o, rname) ? <a className="edit-order wa-order" href={whatsappLink(o, rname)} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${o.customer}`}>WhatsApp</a> : <span className="edit-order wa-none" title="No phone number on this order">No phone</span>}</div></div>)
   })
-  return <div className="order-table">{rows}</div>
+  return <><div className="order-table">{rows}</div><Pager p={pg} /></>
 }
 function RecipeCard({r,onClick}) { return <button className="recipe-card" onClick={onClick}><div className={`food-art ${r.color}`}>{r.emoji}<span>✦</span></div><div className="recipe-info"><div><b>{r.name}</b><small>{r.category} · {r.time}</small></div><span className={r.stock==='Low stock'?'stock low':'stock'}>{r.stock}</span></div><div className="recipe-metrics"><span>Food cost <b>{r.foodCost}%</b></span><span>Sell <b>₹{r.price}</b></span></div></button> }
 /* Pending orders grouped by dish: how many of each item still need to be cooked. */
@@ -525,6 +526,7 @@ function PrepPage({ orders, today, restaurant, notify }) {
     row.qty += l.quantity; row.orders.add(o.id); const dk = deliveryKey(o); row.byDay[dk] = (row.byDay[dk] || 0) + l.quantity; map.set(key, row)
   }))
   const rows = [...map.values()].sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name))
+  const pg = usePaged(rows, 10, dayKey + ':' + stage + ':' + rows.length)
   const totalItems = rows.reduce((n, r) => n + r.qty, 0)
   const stageName = stage === 'New' ? 'not started' : stage === 'Cooking' ? 'being cooked' : 'pending'
   const text = () => `${restaurant} · to cook${dayKey === 'all' ? '' : ' · ' + dayLabel(dayKey, today)}\n` + rows.map(r => `${r.qty} × ${r.name}`).join('\n')
@@ -542,10 +544,10 @@ function PrepPage({ orders, today, restaurant, notify }) {
       {waitingPay.length > 0 && <p className="prep-wait" role="status"><b>{waitingPay.length} order{waitingPay.length === 1 ? '' : 's'} waiting for UPI payment.</b> They appear here once you confirm the payment in Orders.</p>}
       {rows.length === 0 ? <p className="no-results prep-empty">Nothing {stageName}{dayKey === 'all' ? '' : ' for ' + dayLabel(dayKey, today).toLowerCase()}. New orders will show up here by themselves.</p> : <>
         <p className="prep-sum"><b>{totalItems}</b> item{totalItems === 1 ? '' : 's'} · <b>{rows.length}</b> dish{rows.length === 1 ? '' : 'es'} · <b>{picked.length}</b> order{picked.length === 1 ? '' : 's'}</p>
-        <ul className="prep-list">{rows.map(r => <li key={r.name} className="prep-row">
+        <ul className="prep-list">{pg.items.map(r => <li key={r.name} className="prep-row">
           <span className="prep-qty" aria-label={`${r.qty} to cook`}>{r.qty}</span>
           <span className="prep-main"><b>{r.name}</b><small>in {r.orders.size} order{r.orders.size === 1 ? '' : 's'}{dayKey === 'all' && Object.keys(r.byDay).length > 1 ? ' · ' + Object.keys(r.byDay).sort().map(d => `${dayLabel(d, today)} ${r.byDay[d]}`).join(' · ') : ''}</small></span>
-        </li>)}</ul></>}
+        </li>)}</ul><Pager p={pg} /></>}
     </div>
   </section>
 }
@@ -610,6 +612,7 @@ function CustomersPage({ restaurant, notify }) {
   const all = (rows || []).filter(c => !q.trim() || `${c.name} ${c.phone}`.toLowerCase().includes(q.trim().toLowerCase()))
   const repeat = all.filter(c => c.orders >= 2), lapsed = all.filter(c => daysSince(c.last_order) >= 14)
   const shown = tab === 'Repeat' ? repeat : tab === 'Not ordered in 14 days' ? lapsed : all
+  const pg = usePaged(shown, 10, tab + ':' + shown.length)
   const money = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`
   const msg = (c) => `Hi ${String(c.name || '').split(' ')[0] || 'there'}, thank you for ordering from ${(c.restaurants || []).join(' and ') || restaurant.name}! We have fresh dishes today. Order here: ${window.location.origin}/${restaurant.slug}/order\n— ${restaurant.name}`
   return <section className="cust-page">
@@ -618,11 +621,11 @@ function CustomersPage({ restaurant, notify }) {
       <div className="tabs status-tabs" role="tablist" aria-label="Customers">{[['All', all.length], ['Repeat', repeat.length], ['Not ordered in 14 days', lapsed.length]].map(([x, n]) => <button role="tab" aria-selected={tab === x} className={tab === x ? 'tab active-tab' : 'tab'} onClick={() => setTab(x)} key={x}>{x}<em className="tab-n">{n}</em></button>)}</div>
       <label className="search"><Icon name="search" size={16}/><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or phone" aria-label="Search customers"/></label>
     </section>
-    <section className="panel pay-list">{rows === null ? <p className="no-results">Loading…</p> : shown.length ? <ul>{shown.map(c => <li key={c.phone} className="pay-row">
+    <section className="panel pay-list">{rows === null ? <p className="no-results">Loading…</p> : shown.length ? <><ul>{pg.items.map(c => <li key={c.phone} className="pay-row">
       <div className="pay-who"><b>{c.name || 'Guest'}</b><span>{c.phone}</span><span className="pay-txn-line">{(c.restaurants || []).join(' · ')}</span></div>
       <div className="pay-amt"><b>{money(c.spent)}</b><span>{c.orders} order{c.orders === 1 ? '' : 's'} · last {daysSince(c.last_order) === 0 ? 'today' : `${daysSince(c.last_order)} day${daysSince(c.last_order) === 1 ? '' : 's'} ago`}</span></div>
       <div className="pay-state"><a className="edit-order" target="_blank" rel="noopener noreferrer" href={`https://wa.me/91${c.phone}?text=${encodeURIComponent(msg(c))}`}>WhatsApp</a><a className="text-btn" href={`tel:+91${c.phone}`}>Call</a></div>
-    </li>)}</ul> : <p className="no-results">No customers match.</p>}</section>
+    </li>)}</ul><Pager p={pg} /></> : <p className="no-results">No customers match.</p>}</section>
   </section>
 }
 /* Who has paid and who has not, for the restaurant being managed. */
@@ -646,6 +649,7 @@ function PaymentsPage({ orders, onPay, onPaid, restaurant }) {
   const order = { verify: 0, unpaid: 1, paid: 2 }
   const rows = base.filter(r => tab === 'All' || r.key === ({ 'Not paid': 'unpaid', 'To verify': 'verify', Paid: 'paid' })[tab])
     .sort((a, b) => order[a.key] - order[b.key] || String(b.o.createdAt).localeCompare(String(a.o.createdAt)))
+  const pg = usePaged(rows, 10, tab + ':' + rows.length)
   const money = (n) => `₹${Math.round(n).toLocaleString('en-IN')}`
   const nameOf = (o) => String(o.customer || 'Guest').split('·')[0].trim()
   return <section className="pay-page">
@@ -659,7 +663,7 @@ function PaymentsPage({ orders, onPay, onPaid, restaurant }) {
       <div className="filters"><select value={ost} onChange={e => setOst(e.target.value)} aria-label="Order status"><option>All orders</option><option>New</option><option>Cooking</option><option>Ready</option><option>Delivered</option></select><select value={range} onChange={e => setRange(e.target.value)} aria-label="Payment date"><option>All dates</option><option>Today</option><option>Last 7 days</option></select></div>
       <label className="search"><Icon name="search" size={16}/><input value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or order number" aria-label="Search payments"/></label>
     </section>
-    <section className="panel pay-list">{rows.length ? <ul>{rows.map(({ o, key, label }) => <li key={o.id} className={`pay-row ${key}`}>
+    <section className="panel pay-list">{rows.length ? <><ul>{pg.items.map(({ o, key, label }) => <li key={o.id} className={`pay-row ${key}`}>
       <div className="pay-who"><b>{nameOf(o)}</b><span>{o.id}{customerPhone(o) ? ` · ${customerPhone(o)}` : ''}</span>{o.paymentTxn && <span className="pay-txn-line">Transaction ID <code>{o.paymentTxn}</code></span>}{o.paymentRejectReason && key === 'unpaid' && <span className="pay-txn-line">Rejected: {o.paymentRejectReason}</span>}</div>
       <div className="pay-amt"><b>₹{o.total}</b><span>{o.payment || 'Cash on delivery'} · {o.status}</span></div>
       <div className="pay-state"><span className={`pay-pill ${key}`}>{label}</span>
@@ -668,7 +672,7 @@ function PaymentsPage({ orders, onPay, onPaid, restaurant }) {
         {o.payment !== 'UPI' && key === 'unpaid' && <button className="edit-order" onClick={() => onPaid(o, true)}>Mark received</button>}
         {o.payment !== 'UPI' && key === 'paid' && <button className="text-btn" onClick={() => onPaid(o, false)}>Undo</button>}
       </div>
-    </li>)}</ul> : <p className="no-results">No payments match.</p>}</section>
+    </li>)}</ul><Pager p={pg} /></> : <p className="no-results">No payments match.</p>}</section>
     <p className="pay-foot">Cancelled orders are not shown. UPI payments are confirmed by you after checking your UPI app. For cash, press Mark received when the money is collected.</p>
   </section>
 }
@@ -686,7 +690,7 @@ function RecipeOptionsEditor({ recipe, onAdd, onRemove }) {
       <button className="primary app-btn" disabled={!ok}>Add</button>
     </form></div>
 }
-function RecipesPage({recipes,recipe,onSelect,onNew,onEdit,today,onSoldOut,onPhoto,onRemovePhoto,onLimit,onHalf,onAddOption,onRemoveOption}) { if (!recipe) return <section className="empty panel"><div className="empty-icon">🍽️</div><h2>Your recipe library is empty</h2><p>Create a recipe and it will be saved in Supabase.</p><button className="primary" onClick={onNew}>Add recipe</button></section>; return <div className="recipes-layout"><section className="panel recipe-list"><div className="panel-heading"><div><h3>Recipe library</h3><p>{recipes.length} recipes in your kitchen</p></div><button className="round-add" onClick={onNew}><Icon name="plus"/></button></div>{recipes.map(r=><button className={recipe.id===r.id?'recipe-line selected':'recipe-line'} key={r.id} onClick={()=>onSelect(r)}>{r.imageUrl ? <img className="mini-photo" src={r.imageUrl} alt="" width="40" height="40"/> : <span className={`mini-art ${r.color}`}>{r.emoji}</span>}<div><b>{r.name}</b><small>{r.category} · ₹{r.price}{r.soldOutDate === today ? ' · sold out today' : ''}</small></div><span>›</span></button>)}</section><section className="panel recipe-detail"><div className="detail-top"><div className={`big-art ${recipe.color}`}>{recipe.emoji}</div><div><span className="eyebrow">{recipe.category}</span><h2>{recipe.name}</h2><p>Yield: 1 serving · {recipe.time} total time</p></div><button className="more" title="Edit recipe" onClick={()=>onEdit(recipe)}><Icon name="more"/></button></div><div className="recipe-ctrl">
+function RecipesPage({recipes,recipe,onSelect,onNew,onEdit,today,onSoldOut,onPhoto,onRemovePhoto,onLimit,onHalf,onAddOption,onRemoveOption}) { const pg = usePaged(recipes, 10, recipes.length); if (!recipe) return <section className="empty panel"><div className="empty-icon">🍽️</div><h2>Your recipe library is empty</h2><p>Create a recipe and it will be saved in Supabase.</p><button className="primary" onClick={onNew}>Add recipe</button></section>; return <div className="recipes-layout"><section className="panel recipe-list"><div className="panel-heading"><div><h3>Recipe library</h3><p>{recipes.length} recipes in your kitchen</p></div><button className="round-add" onClick={onNew}><Icon name="plus"/></button></div>{pg.items.map(r=><button className={recipe.id===r.id?'recipe-line selected':'recipe-line'} key={r.id} onClick={()=>onSelect(r)}>{r.imageUrl ? <img className="mini-photo" src={r.imageUrl} alt="" width="40" height="40"/> : <span className={`mini-art ${r.color}`}>{r.emoji}</span>}<div><b>{r.name}</b><small>{r.category} · ₹{r.price}{r.soldOutDate === today ? ' · sold out today' : ''}</small></div><span>›</span></button>)}</section><section className="panel recipe-detail"><div className="detail-top"><div className={`big-art ${recipe.color}`}>{recipe.emoji}</div><div><span className="eyebrow">{recipe.category}</span><h2>{recipe.name}</h2><p>Yield: 1 serving · {recipe.time} total time</p></div><button className="more" title="Edit recipe" onClick={()=>onEdit(recipe)}><Icon name="more"/></button></div><div className="recipe-ctrl">
         <div className="rc-photo">{recipe.imageUrl ? <img src={recipe.imageUrl} alt={`${recipe.name} photo`} width="72" height="72"/> : <span className="rc-noimg" aria-hidden="true">📷</span>}
           <div><b>Dish photo</b><small>Shown to customers on the menu.</small>
             <div className="rc-btns"><label className="text-btn rc-file">{recipe.imageUrl ? 'Change photo' : 'Add photo'}<input type="file" accept="image/*" aria-label="Dish photo" onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; onPhoto(recipe, f) }}/></label>{recipe.imageUrl && <button type="button" className="text-btn" onClick={() => onRemovePhoto(recipe)}>Remove</button>}</div></div></div>
@@ -699,7 +703,7 @@ function RecipesPage({recipes,recipe,onSelect,onNew,onEdit,today,onSoldOut,onPho
           <button type="button" role="switch" aria-checked={recipe.soldOutDate === today} aria-label={`Sold out today: ${recipe.name}`} className={recipe.soldOutDate === today ? 'switch on' : 'switch'} onClick={() => onSoldOut(recipe)}><i/></button></div>
       </div><div className="cost-banner"><div><span>SELLING PRICE</span><b>₹{recipe.price}</b></div><div><span>FOOD COST</span><b>{recipe.foodCost}%</b></div><div><span>GROSS MARGIN</span><b>{100-recipe.foodCost}%</b></div></div><div className="detail-columns"><div><h3>Ingredients</h3>{recipe.ingredients.map((x,i)=><div className="ingredient" key={x}><span>{i+1}</span>{x}</div>)}</div><div><h3>Making process</h3>{recipe.steps.map((x,i)=><div className="step" key={x}><span>{i+1}</span><p>{x}</p></div>)}</div></div></section></div> }
 function Placeholder({page,notify}) { return <div className="empty panel"><div className="empty-icon">{page==='Inventory'?'◫':page==='Settings'?'⚙':'↗'}</div><h2>{page} is ready for you</h2><p>This workspace is set up for {page.toLowerCase()} tracking. Connect Supabase to begin saving live kitchen data.</p><button className="primary" onClick={()=>notify(`${page} setup started`)}>Set up {page}</button></div> }
-function InventoryPage({inventory,onNew,onEdit}) { return <section className="panel data-page"><div className="panel-heading"><div><h3>Ingredient inventory</h3><p>Keep stock levels and reorder points in one place.</p></div><button className="primary" onClick={onNew}><Icon name="plus" size={16}/> Add ingredient</button></div><div className="inventory-head"><span>INGREDIENT</span><span>ON HAND</span><span>REORDER AT</span><span>UNIT COST</span><span>STATUS</span></div>{inventory.map(i=>{const low=i.stock<=i.reorder;return <div className="inventory-row" key={i.id}><b>{i.name}</b><span>{i.stock} {i.unit}</span><span>{i.reorder} {i.unit}</span><span>₹{i.cost}</span><span className="inv-status"><span className={low?'stock low':'stock'}>{low?'Low stock':'In stock'}</span><button className="edit-order" onClick={()=>onEdit(i)}>Edit</button></span></div>})}</section> }
+function InventoryPage({inventory,onNew,onEdit}) { const pg = usePaged(inventory, 10, inventory.length); return <section className="panel data-page"><div className="panel-heading"><div><h3>Ingredient inventory</h3><p>Keep stock levels and reorder points in one place.</p></div><button className="primary" onClick={onNew}><Icon name="plus" size={16}/> Add ingredient</button></div><div className="inventory-head"><span>INGREDIENT</span><span>ON HAND</span><span>REORDER AT</span><span>UNIT COST</span><span>STATUS</span></div>{pg.items.map(i=>{const low=i.stock<=i.reorder;return <div className="inventory-row" key={i.id}><b>{i.name}</b><span>{i.stock} {i.unit}</span><span>{i.reorder} {i.unit}</span><span>₹{i.cost}</span><span className="inv-status"><span className={low?'stock low':'stock'}>{low?'Low stock':'In stock'}</span><button className="edit-order" onClick={()=>onEdit(i)}>Edit</button></span></div>})}<Pager p={pg} /></section> }
 function ReportsPage({orders,recipeList}) {
   const all = analyse(orders, recipeList)
   const live = orders.filter(o => o.status !== 'Cancelled' && o.paymentStatus !== 'pending')

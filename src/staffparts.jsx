@@ -362,6 +362,7 @@ export function CouponsSettings({ restaurants, notify }) {
   const [f, setF] = useState(blank), [err, setErr] = useState('')
   const set = (patch) => setF(cur => ({ ...cur, ...patch }))
   useEffect(() => { if (!supabase) return setList([]); let alive = true; supabase.from('coupons').select('*').order('created_at', { ascending: false }).then(({ data }) => { if (alive) setList(data || []) }); return () => { alive = false } }, [])
+  const couponPg = usePaged(list || [], 10, (list || []).length)
   const num = (v) => v === '' ? null : Number(v)
   const add = async (e) => {
     e.preventDefault(); setErr('')
@@ -396,10 +397,10 @@ export function CouponsSettings({ restaurants, notify }) {
       {err && <p className="lset-warn" role="alert">{err}</p>}
       <button className="primary app-btn">Add coupon</button>
     </form>
-    <ul className="coupon-list">{(list || []).map(c => <li key={c.id} className={c.is_active ? 'coupon-row' : 'coupon-row off'}>
+    <ul className="coupon-list">{couponPg.items.map(c => <li key={c.id} className={c.is_active ? 'coupon-row' : 'coupon-row off'}>
       <div><b>{c.code}</b><small>{couponText(c, restaurants)}</small></div>
       <div className="coupon-act"><button type="button" role="switch" aria-checked={c.is_active} aria-label={`${c.code} active`} className={c.is_active ? 'switch on ok' : 'switch'} onClick={() => toggle(c)}><i /></button><button type="button" className="text-btn" onClick={() => remove(c)}>Delete</button></div>
-    </li>)}{list && !list.length && <li className="coupon-empty">No coupons yet.</li>}</ul>
+    </li>)}{list && !list.length && <li className="coupon-empty">No coupons yet.</li>}</ul><Pager p={couponPg} />
   </section>
 }
 
@@ -447,6 +448,7 @@ const ROLE_TEXT = { owner: 'Owner: everything', cook: 'Cook: orders and To cook'
 export function TeamCard({ notify }) {
   const [team, setTeam] = useState(null), [email, setEmail] = useState(''), [role, setRole] = useState('cook'), [err, setErr] = useState('')
   const load = () => { if (!supabase) return setTeam([]); supabase.rpc('list_staff').then(({ data }) => setTeam(data || [])) }
+  const teamPg = usePaged(team || [], 10, (team || []).length)
   useEffect(load, [])
   const save = async (e, r = role, em = email) => {
     e && e.preventDefault(); setErr('')
@@ -467,6 +469,18 @@ export function TeamCard({ notify }) {
       {err && <p className="lset-warn" role="alert">{err}</p>}
       <button className="primary app-btn">Save role</button>
     </form>
-    <ul className="coupon-list team-list">{(team || []).map(m => <li key={m.email} className="team-row"><div><b>{m.email}</b><small>{ROLE_TEXT[m.role] || m.role}</small></div><div className="coupon-act"><button type="button" className="text-btn" onClick={() => save(null, 'remove', m.email)}>Remove</button></div></li>)}{team && !team.length && <li className="coupon-empty">No roles saved yet. Everyone who signs in is an owner until you add the first role.</li>}</ul>
+    <ul className="coupon-list team-list">{teamPg.items.map(m => <li key={m.email} className="team-row"><div><b>{m.email}</b><small>{ROLE_TEXT[m.role] || m.role}</small></div><div className="coupon-act"><button type="button" className="text-btn" onClick={() => save(null, 'remove', m.email)}>Remove</button></div></li>)}{team && !team.length && <li className="coupon-empty">No roles saved yet. Everyone who signs in is an owner until you add the first role.</li>}</ul><Pager p={teamPg} />
   </section>
+}
+
+/* Ten rows to a page for every admin list */
+export function usePaged(list, size = 10, resetKey = '') {
+  const [page, setPage] = useState(0)
+  useEffect(() => { setPage(0) }, [resetKey])
+  const pages = Math.max(1, Math.ceil(list.length / size)), cur = Math.min(page, pages - 1)
+  return { items: list.slice(cur * size, cur * size + size), page: cur, pages, setPage, total: list.length, size }
+}
+export function Pager({ p }) {
+  if (!p || p.pages <= 1) return null
+  return <nav className="pager" aria-label="Pages"><button type="button" className="app-btn" disabled={p.page === 0} onClick={() => p.setPage(p.page - 1)}>Previous</button><span>Page {p.page + 1} of {p.pages} · {p.total} total</span><button type="button" className="app-btn" disabled={p.page >= p.pages - 1} onClick={() => p.setPage(p.page + 1)}>Next</button></nav>
 }
