@@ -356,3 +356,34 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .goal-form h3{margin:0}
 .goal-form input{width:100%;box-sizing:border-box}
 @media (prefers-reduced-motion:reduce){.goal-seg{transition:none}}
+
+/* ---- recipe controls: photo + sold out ---- */
+.recipe-ctrl{display:grid;gap:14px;margin:14px 0;padding:14px;border-radius:16px;border:1px solid var(--line,#3a3a3a)}
+.rc-photo{display:flex;gap:14px;align-items:center}
+.rc-photo img,.rc-noimg{flex:none;width:72px;height:72px;border-radius:14px;object-fit:cover;display:grid;place-items:center;background:rgba(127,127,127,.18);font-size:28px}
+.rc-photo small,.rc-sold small{display:block;color:var(--muted);font-size:13px;line-height:1.4;margin-top:2px}
+.rc-btns{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap}
+.rc-file{position:relative;cursor:pointer;display:inline-flex;align-items:center;min-height:40px}
+.rc-file input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%}
+.rc-sold{display:flex;gap:14px;justify-content:space-between;align-items:center}
+.switch{flex:none;width:56px;height:32px;border-radius:999px;border:0;background:rgba(127,127,127,.4);position:relative;cursor:pointer;padding:0;transition:background .2s}
+.switch i{position:absolute;top:4px;left:4px;width:24px;height:24px;border-radius:50%;background:#fff;transition:transform .2s}
+.switch.on{background:#B83221}
+.switch.on i{transform:translateX(24px)}
+.mini-photo{flex:none;width:40px;height:40px;border-radius:10px;object-fit:cover}
+
+.wa-order{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;color:#1f8f4f}
+.wa-none{opacity:.45;cursor:default}
+
+/* ---- coupons + backup ---- */
+.couponcard,.backupcard{margin-bottom:18px}
+.coupon-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px}
+.coupon-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px;border-radius:14px;border:1px solid var(--line,#3a3a3a)}
+.coupon-row.off{opacity:.55}
+.coupon-row b{display:block;letter-spacing:.04em}
+.coupon-row small{display:block;color:var(--muted);font-size:13px;line-height:1.4;margin-top:2px}
+.coupon-act{display:flex;align-items:center;gap:12px;flex:none}
+.coupon-empty{color:var(--muted);font-size:14px}
+.switch.ok.on{background:#2f7d4a}
+.backup-row{display:flex;flex-wrap:wrap;gap:10px}
+.backup-btn{min-height:48px;padding:0 16px;border:1px solid var(--line,#3a3a3a);border-radius:12px}

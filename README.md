@@ -113,3 +113,16 @@ This is optional and free. A new customer order reaches staff phones even when t
 The ntfy topic in Settings keeps working as a separate backup.
 - **Sales goal** (Overview): combined sales of both restaurants against a goal the owner sets, for example "London trip", ₹1L. A bar shows how far you are, with each restaurant's share. Edit the name, target (type 50K, 1L, 1Cr or a number) and start date with "Edit goal". Cancelled orders are not counted.
 - **Order alerts reach you for both restaurants, whichever one you have open.** The popup, sound and phone notification all name the restaurant, and "View order" switches to it. The order list, badges and stock still only show the restaurant you are managing.
+
+## More features (all free to run)
+- **Sold out today**: on a dish in Recipes, switch "Sold out today". Customers see "Sold out today" and can't add it. It clears itself the next day.
+- **Dish photos**: add a photo to a dish in Recipes. It is resized on the phone and stored in the free `dish-photos` storage bucket (created by `schema.sql`).
+- **Coupon codes** (Settings → Coupon codes): percent or rupees off, optional cap, minimum order, expiry date and use limit, for both restaurants or one. The server works out the discount.
+- **UPI pay button**: each restaurant sets its own UPI ID in its Settings. Customers who choose UPI get a "Pay with UPI" button with the amount filled in. No gateway, no fees; you confirm payments yourself.
+- **WhatsApp button** on each order: opens WhatsApp to the customer with a ready message for the order's status. You press send.
+- **Order again** on the tracking page: refills the cart from a past order at today's prices.
+- **Low-stock alerts**: a notification when an ingredient falls to its reorder level. Turn on or off per restaurant in Settings.
+- **Daily closing summary** at 10:30 pm IST (orders and sales per restaurant, plus the sales goal), by push and ntfy. Needs the `pg_cron` extension (Database → Extensions), then run `schema.sql` again.
+- **Reports**: busiest hours, busiest days of the week and slow sellers.
+- **Backup** (Settings): download orders, menu and stock as spreadsheets, or everything as one file.
+- The greeting on the dashboard follows the time of day and shows the owner of the restaurant you are managing.

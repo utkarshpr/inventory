@@ -13,19 +13,26 @@ Deno.serve(async (req) => {
   if (!pub || !priv) return new Response('VAPID keys are not set', { status: 500 })
   webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT') ?? 'mailto:owner@example.com', pub, priv)
 
-  let b: { restaurant_id?: string; restaurant?: string; order_number?: string; total?: number; delivery_date?: string }
+  let b: { restaurant_id?: string; restaurant?: string; order_number?: string; total?: number; delivery_date?: string; all?: boolean; title?: string; body?: string; tag?: string }
   try { b = await req.json() } catch { return new Response('bad json', { status: 400 }) }
-  if (!b.restaurant_id || !b.order_number) return new Response('missing fields', { status: 400 })
+  const custom = typeof b.title === 'string' && b.title.length > 0   // any other alert: low stock, daily summary
+  if (!custom && (!b.restaurant_id || !b.order_number)) return new Response('missing fields', { status: 400 })
+  if (custom && !b.all && !b.restaurant_id) return new Response('missing fields', { status: 400 })
 
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-  const { data: subs, error } = await sb.from('push_subscriptions').select('endpoint, p256dh, auth').eq('restaurant_id', b.restaurant_id)
+  let q = sb.from('push_subscriptions').select('endpoint, p256dh, auth')
+  if (!b.all) q = q.eq('restaurant_id', b.restaurant_id!)
+  const { data: rows, error } = await q
   if (error) return new Response(error.message, { status: 500 })
+  const subs = [...new Map((rows ?? []).map((r) => [r.endpoint, r])).values()]   // one notification per phone
 
-  const payload = JSON.stringify({
-    title: `New order · ${b.restaurant ?? 'Kitchen'}`,
-    body: `${b.order_number} · ₹${b.total ?? ''}${b.delivery_date ? ' · delivery ' + b.delivery_date : ''}`,
-    tag: b.order_number, url: '/',
-  })
+  const payload = JSON.stringify(custom
+    ? { title: b.title, body: b.body ?? '', tag: b.tag, url: '/' }
+    : {
+        title: `New order · ${b.restaurant ?? 'Kitchen'}`,
+        body: `${b.order_number} · ₹${b.total ?? ''}${b.delivery_date ? ' · delivery ' + b.delivery_date : ''}`,
+        tag: b.order_number, url: '/',
+      })
   let sent = 0
   await Promise.all((subs ?? []).map(async (s) => {
     try {

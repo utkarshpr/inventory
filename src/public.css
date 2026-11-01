@@ -244,3 +244,139 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;font-size:14px}
 .c-app .c-pager .c-btn{min-height:44px;padding:0 16px}
 .c-app .c-pager .c-btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* dish photos, sold out, coupon, UPI, order again */
+.c-app .c-dish{align-items:center}
+.c-app .c-dish-photo{flex:none;width:64px;height:64px;border-radius:14px;object-fit:cover;margin-right:12px;background:var(--c-line)}
+.c-app .c-dish.sold{opacity:.6}
+.c-app .c-soldout{display:block;font-size:12px;font-weight:700;color:var(--c-chilli);margin-top:2px}
+.c-app .c-coupon-row{display:flex;gap:8px}
+.c-app .c-coupon-row .c-input{flex:1;min-width:0;text-transform:uppercase}
+.c-app .c-coupon-row .c-btn{min-height:48px;padding:0 16px}
+.c-app .c-coupon-ok{color:#2f7d4a;font-weight:600}
+.c-app .c-coupon-bad{color:var(--c-chilli);font-weight:600}
+.c-app .c-was{opacity:.6;margin-right:6px;font-weight:500}
+.c-app .c-reorder{margin:6px 0 10px}
+.c-app .c-upi{display:grid;gap:8px;margin:12px 0}
+.c-app .c-upi-btn{display:block;text-align:center;text-decoration:none}
+.c-app .c-upi-id{margin:0;font-size:14px}
+.c-app .c-upi-id .c-btn{min-height:36px;padding:0 12px;margin-left:6px}
+.c-app .c-upi-note{opacity:.75;line-height:1.4}
+.c-app .c-ordlist li{display:grid;gap:6px}
+.c-app .c-again{justify-self:end;min-height:40px;padding:0 14px;border-radius:999px;border:1px solid var(--c-line);background:transparent;color:inherit;font:inherit;font-size:13px;font-weight:600;cursor:pointer}
+.c-app .c-again-btn{margin-top:8px}
+
+/* =====================================================================
+   Premium customer pages: order + tracking.
+   Colours still come only from the restaurant theme. One bold move: the brand band with the
+   menu sheet rising over it. Everything else stays quiet.
+   ===================================================================== */
+.c-app{--c-radius:18px;--c-shadow:0 10px 30px color-mix(in srgb,var(--c-ink) 12%,transparent)}
+
+/* brand band + sheet */
+.c-app.c-order .c-bar{position:relative;top:auto;height:auto;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:6px 10px;padding:calc(10px + env(safe-area-inset-top)) 16px 54px 6px;background:var(--c-hero);color:var(--c-hero-ink);border-bottom:0}
+.c-app.c-order .c-bar .c-back{color:inherit;display:grid;place-items:center;width:44px;height:44px}
+.c-app.c-order .c-bar-mark{flex:none;min-width:0;gap:12px}
+.c-app.c-order .c-bar-mark .c-logo{width:52px;height:52px;box-shadow:0 0 0 2.5px color-mix(in srgb,var(--c-hero-ink) 55%,transparent),0 6px 18px rgba(0,0,0,.2)}
+.c-app.c-order .c-bar-mark .c-mark-name{font-size:25px;line-height:1;font-weight:800;font-variation-settings:'wdth' 78;letter-spacing:-.01em;color:var(--c-hero-ink)}
+.c-app.c-order .c-switch{justify-self:end;display:grid;gap:0;padding:6px 12px;border-radius:14px;border:1px solid color-mix(in srgb,var(--c-hero-ink) 32%,transparent);color:var(--c-hero-ink);text-decoration:none;font-size:11.5px;line-height:1.25;text-align:right}
+.c-app.c-order .c-switch b{font-size:13px}
+.c-app.c-order .c-bar-meta{grid-column:1 / -1;display:flex;align-items:center;gap:4px;margin:2px 0 0 50px;font-size:14px;font-weight:500;opacity:.92}
+.c-app.c-order .c-page{position:relative;margin-top:-30px;padding-top:28px;background:var(--c-bg);border-radius:30px 30px 0 0;box-shadow:0 -14px 34px rgba(0,0,0,.16)}
+.c-app.c-order .c-page .c-h1{font-size:32px;margin-bottom:6px}
+
+/* menu */
+.c-app .c-cat{display:flex;align-items:center;gap:12px;margin:30px 0 4px;font-size:21px}
+.c-app .c-cat::after{content:'';flex:1;height:1px;background:var(--c-line)}
+.c-app .c-menu{border-top:0}
+.c-app .c-dish{padding:16px 0;border-bottom:1px solid color-mix(in srgb,var(--c-line) 70%,transparent);gap:14px}
+.c-app .c-dish.on{padding-left:12px;margin-left:-12px;margin-right:-12px;padding-right:12px;border-radius:16px;background:color-mix(in srgb,var(--c-accent-solid) 14%,transparent);box-shadow:none;border-bottom-color:transparent}
+.c-app .c-dish-name{font-size:18px;font-weight:650}
+.c-app .c-dish-price{font-size:15px;font-weight:600;color:var(--c-ink);opacity:.7}
+.c-app .c-dish-photo{width:76px;height:76px;margin-right:0;border-radius:20px;box-shadow:0 6px 16px color-mix(in srgb,var(--c-ink) 18%,transparent)}
+.c-app .c-dish.sold .c-dish-photo{filter:grayscale(1)}
+.c-app .c-add{min-width:86px;min-height:44px;border:1.5px solid var(--c-ink);border-radius:999px;background:transparent;color:var(--c-ink);font-size:15.5px;letter-spacing:.01em;transition:background .15s,color .15s}
+.c-app .c-add:active{background:var(--c-btn);color:var(--c-btn-ink)}
+.c-app .c-step{width:44px;height:44px;border:0;border-radius:50%;background:var(--c-btn);color:var(--c-btn-ink)}
+.c-app .c-step:active{filter:brightness(1.15);background:var(--c-btn)}
+.c-app .c-n{min-width:40px;font-size:20px}
+
+/* delivery days as tickets */
+.c-app .c-day{min-width:88px;min-height:76px;border:1.5px solid var(--c-line);border-radius:20px;background:var(--c-surface)}
+.c-app .c-day b{font-size:15px}
+.c-app .c-day span{font-size:13px;font-weight:600}
+.c-app .c-day.on{background:var(--c-btn);color:var(--c-btn-ink);border-color:transparent;box-shadow:0 8px 20px color-mix(in srgb,var(--c-ink) 22%,transparent)}
+.c-app .c-day.on span{opacity:.9}
+
+/* form */
+.c-app .c-input{min-height:54px;border-radius:16px;border-color:color-mix(in srgb,var(--c-line) 85%,transparent);box-shadow:0 1px 2px color-mix(in srgb,var(--c-ink) 6%,transparent)}
+.c-app .c-field>span,.c-app .c-field>legend{font-size:14px;font-weight:650;margin-bottom:8px}
+.c-app .c-chip{min-height:54px;border-radius:16px;font-weight:600}
+.c-app .c-chip.on{background:var(--c-btn);color:var(--c-btn-ink);border-color:transparent;box-shadow:0 8px 18px color-mix(in srgb,var(--c-ink) 20%,transparent)}
+.c-app .c-coupon-row .c-input{text-transform:none}
+.c-app .c-coupon-row .c-input:not(:placeholder-shown){text-transform:uppercase}
+.c-app .c-coupon-row .c-btn{min-height:54px;border-radius:16px}
+.c-app .c-btn-line{border-width:1.5px}
+
+/* floating cart bar */
+.c-app .c-cart{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));max-width:540px;margin:0 auto;padding:10px 10px 10px 20px;border-radius:26px;background:linear-gradient(135deg,var(--c-dark),color-mix(in srgb,var(--c-dark) 82%,#000));box-shadow:0 20px 44px rgba(0,0,0,.34)}
+.c-app .c-cart .c-cta{min-height:54px;border-radius:19px;font-size:17px}
+.c-app .c-cart-sum span{font-size:23px}
+
+/* order received */
+.c-app .c-dlg-ref{border:2px dashed color-mix(in srgb,var(--c-ink) 28%,transparent);background:var(--c-surface);border-radius:18px}
+.c-app .c-dlg-items li+li{border-top-style:dashed}
+.c-app .c-dialog{border-radius:30px;box-shadow:0 40px 90px rgba(0,0,0,.4)}
+.c-app .c-success{border-bottom:0;padding:18px;border-radius:24px;background:var(--c-surface);box-shadow:var(--c-shadow)}
+
+/* tracking */
+.c-app .c-track>.c-h2{font-size:25px;margin-bottom:2px}
+.c-app .c-trackform .c-input,.c-app .c-trackform .c-btn{min-height:56px;border-radius:16px}
+.c-app .c-ordlist{gap:12px}
+.c-app .c-ordlist li{gap:0;border:1px solid var(--c-line);border-radius:22px;background:var(--c-surface);overflow:hidden;box-shadow:0 4px 14px color-mix(in srgb,var(--c-ink) 7%,transparent);transition:border-color .15s,box-shadow .15s}
+.c-app .c-ordlist li:has(.c-ordrow.on){border-color:var(--c-ink);box-shadow:var(--c-shadow)}
+.c-app .c-ordrow{min-height:72px;padding:14px 16px;border:0;border-radius:0;background:transparent}
+.c-app .c-ordrow.on{border:0}
+.c-app .c-ordmain b{font-size:18px;font-variation-settings:'wdth' 88;letter-spacing:.02em}
+.c-app .c-orditems{font-weight:500}
+.c-app .c-again{justify-self:stretch;width:100%;min-height:48px;border:0;border-top:1px solid var(--c-line);border-radius:0;background:color-mix(in srgb,var(--c-accent-solid) 12%,transparent);font-size:14px}
+.c-app .c-pill{padding:6px 14px;font-weight:700;white-space:nowrap}
+.c-app .c-pill.bad{background:color-mix(in srgb,var(--c-chilli) 14%,transparent);color:var(--c-chilli)}
+
+/* the status card with a vertical timeline */
+.c-app .c-result{margin-top:16px;padding:18px 18px 14px;border:1px solid var(--c-line);border-radius:24px;background:var(--c-surface);box-shadow:var(--c-shadow)}
+.c-app .c-result-head b{font-size:23px;font-variation-settings:'wdth' 82}
+.c-app .c-result .c-steps{grid-template-columns:1fr;gap:0;margin:18px 0 6px}
+.c-app .c-result .c-steps li{padding:0 0 20px 38px;text-align:left;font-size:15.5px;line-height:22px}
+.c-app .c-result .c-steps li:last-child{padding-bottom:0}
+.c-app .c-result .c-steps li::before{top:1px;left:0;width:22px;height:22px;margin-left:0;display:grid;place-items:center;font-size:12px;font-weight:800;color:#fff;line-height:1}
+.c-app .c-result .c-steps li::after{display:block;top:26px;left:10px;width:2px;height:calc(100% - 24px);margin:0}
+.c-app .c-result .c-steps li:last-child::after{display:none}
+.c-app .c-result .c-steps li.done::before{content:'✓'}
+.c-app .c-result .c-steps li.now::before{box-shadow:0 0 0 6px color-mix(in srgb,var(--c-accent-solid) 38%,transparent)}
+@media (prefers-reduced-motion:no-preference){
+  .c-app .c-result .c-steps li.now::before{animation:c-pulse 1.8s ease-out infinite}
+  @keyframes c-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c-accent-solid) 70%,transparent)}100%{box-shadow:0 0 0 12px transparent}}
+}
+
+/* fixes: stacking, switch-restaurant logo button, day-chip shadow room */
+.c-app.c-order .c-bar{z-index:0}
+.c-app.c-order .c-page{z-index:1}
+.c-app.c-order .c-switch-logo{display:grid;place-items:center;width:46px;height:46px;padding:0;border-radius:50%;border:0;justify-self:end}
+.c-app.c-order .c-switch-logo .c-logo{width:40px;height:40px;box-shadow:0 0 0 2px color-mix(in srgb,var(--c-hero-ink) 45%,transparent)}
+.c-app.c-order .c-switch-logo .c-switch-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.c-app.c-order .c-bar-mark .c-mark-name{font-size:24px}
+.c-app .c-days{padding-bottom:18px;margin-bottom:-6px}
+/* spacing + band fit on 390px phones */
+.c-app.c-order .c-bar{grid-template-columns:auto minmax(0,1fr) auto;padding-right:14px}
+.c-app.c-order .c-bar-mark{gap:10px}
+.c-app.c-order .c-bar-mark .c-logo{width:48px;height:48px}
+.c-app.c-order .c-bar-mark .c-mark-name{font-size:22px}
+.c-app.c-order .c-bar-meta{margin-left:50px}
+.c-app .c-cat+.c-field,.c-app .c-cat+p+.c-field{margin-top:12px}
+.c-app h2.c-cat+label.c-field{margin-top:14px}
+.c-app.c-order .c-switch-logo{max-width:none;min-width:46px}
+.c-app .c-result .c-steps+.c-sub{margin-top:14px}
+.c-app .c-again-btn{margin-top:12px}
+.c-app .c-upi-btn{display:flex;align-items:center;justify-content:center;min-height:56px;line-height:1}
+.c-app .c-upi-id code{font-size:13.5px}

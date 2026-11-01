@@ -55,3 +55,14 @@ Leave the dashboard open. The strip shows **Live**, **Sound on**, **Screen stays
 - If you set up closed-app alerts (README): turn them on on your phone, close the app completely, place a test order at each restaurant from another device and confirm a notification arrives for both, naming the right restaurant.
 - Overview: the Sales goal card shows both restaurants together. Use Edit goal to set a name and target (for example 1L), and confirm the percentage and amount look right.
 - With Salt & Saffron open on the dashboard, place an order at Oven & Chives from another device: a popup (named Oven & Chives) and the sound should appear. "View order" should switch you to Oven & Chives.
+
+## 9. More features
+- Recipes: switch "Sold out today" on a dish, open the customer order page and confirm it says "Sold out today" and can't be added. Switch it off again.
+- Recipes: add a photo to a dish and confirm it shows on the customer menu.
+- Settings: add a coupon (for example WELCOME10, 10%). On the order page apply it and confirm the total drops; place the order and confirm the discount is on it. Then delete the test coupon.
+- Settings: set a UPI ID for one restaurant. Place a UPI order there and confirm "Pay with UPI" opens your UPI app with the right amount. Confirm the other restaurant (with no UPI ID) shows no button.
+- Orders: tap WhatsApp on an order and confirm WhatsApp opens to that customer with a message.
+- Tracking: look up a phone number with past orders and tap "Order again".
+- Settings → Backup: download the orders spreadsheet and open it.
+- Low stock: lower an ingredient below its reorder level and confirm a notification arrives. Turn the setting off and confirm it stops.
+- After running the schema with pg_cron on, at 10:30 pm IST confirm the daily summary arrives.

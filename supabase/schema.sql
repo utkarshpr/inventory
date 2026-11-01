@@ -138,6 +138,12 @@ exception when duplicate_object then null; end $$;
 
 alter table public.orders add column if not exists delivery_date date;
 alter table public.orders add column if not exists cancel_reason text;
+alter table public.orders add column if not exists coupon_code text;
+alter table public.orders add column if not exists discount numeric not null default 0;
+alter table public.recipes add column if not exists sold_out_date date;   -- sold out for that day only; clears itself the next day
+alter table public.recipes add column if not exists image_url text;
+alter table public.restaurants add column if not exists upi_id text;
+alter table public.restaurants add column if not exists low_stock_alerts boolean not null default true;   -- Settings: alert when an ingredient runs low
 update public.orders set delivery_date = (created_at at time zone 'Asia/Kolkata')::date where delivery_date is null;   -- older orders: delivered on the day they were placed
 alter table public.orders alter column delivery_date set default ((now() at time zone 'Asia/Kolkata')::date);
 alter table public.orders alter column delivery_date set not null;
@@ -307,15 +313,70 @@ create policy "Customers can view menu" on public.recipes
 -- ============================================================
 -- 3. Customer ordering: server-side validation + total, per restaurant, on an allowed delivery day
 -- ============================================================
+-- Coupon codes. Customers never read this table; they can only ask whether a code works (validate_coupon).
+create table if not exists public.coupons (
+  id uuid primary key default gen_random_uuid(),
+  code text not null unique,
+  restaurant_id uuid references public.restaurants(id) on delete cascade,   -- null = works at both restaurants
+  kind text not null check (kind in ('percent', 'flat')),
+  value numeric not null check (value > 0),
+  max_discount numeric check (max_discount is null or max_discount > 0),    -- cap for percent codes
+  min_order numeric not null default 0 check (min_order >= 0),
+  expires_on date,
+  max_uses int check (max_uses is null or max_uses > 0),
+  used int not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  check (kind <> 'percent' or value <= 100)
+);
+alter table public.coupons enable row level security;
+drop policy if exists "Staff can manage coupons" on public.coupons;
+create policy "Staff can manage coupons" on public.coupons for all to authenticated using (true) with check (true);
+
+create or replace function public.coupon_discount(p_rid uuid, p_code text, p_subtotal numeric)
+returns numeric
+language plpgsql security definer set search_path = public as $$
+declare c record; d numeric;
+begin
+  select * into c from public.coupons
+   where code = upper(trim(p_code)) and is_active and (restaurant_id is null or restaurant_id = p_rid);
+  if not found
+     or (c.expires_on is not null and c.expires_on < (now() at time zone 'Asia/Kolkata')::date)
+     or (c.max_uses is not null and c.used >= c.max_uses) then
+    raise exception 'COUPON: This code is not valid';
+  end if;
+  if p_subtotal < c.min_order then
+    raise exception 'COUPON: This code needs an order of at least ₹%', trim_scale(c.min_order);
+  end if;
+  d := case c.kind when 'percent' then round(p_subtotal * c.value / 100) else c.value end;
+  if c.kind = 'percent' and c.max_discount is not null then d := least(d, c.max_discount); end if;
+  return least(d, p_subtotal);
+end $$;
+revoke all on function public.coupon_discount(uuid, text, numeric) from public, anon, authenticated;
+
+create or replace function public.validate_coupon(p_restaurant text, p_code text, p_subtotal numeric)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare rid uuid; d numeric;
+begin
+  select id into rid from public.restaurants where slug = p_restaurant;
+  if rid is null then raise exception 'Restaurant not found'; end if;
+  d := public.coupon_discount(rid, p_code, coalesce(p_subtotal, 0));
+  return jsonb_build_object('code', upper(trim(p_code)), 'discount', d);
+end $$;
+revoke all on function public.validate_coupon(text, text, numeric) from public;
+grant execute on function public.validate_coupon(text, text, numeric) to anon, authenticated;
+
+drop function if exists public.place_order(text, text, text, text, text, text, jsonb, date);
 create or replace function public.place_order(
-  p_restaurant text, p_name text, p_phone text, p_address text, p_payment text, p_notes text, p_items jsonb, p_delivery_date date
+  p_restaurant text, p_name text, p_phone text, p_address text, p_payment text, p_notes text, p_items jsonb, p_delivery_date date, p_coupon text default null
 ) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare
   rest record; it jsonb; rc record; qty int;
   v_phone text; v_ip text; v_hash text; n int;
   v_ph int; v_pd int; v_ch int;
-  total numeric := 0;
+  total numeric := 0; v_disc numeric := 0; v_code text; subtotal numeric;
   lines jsonb := '[]'::jsonb;
   num text; tries int := 0;
 begin
@@ -367,10 +428,13 @@ begin
   for it in select * from jsonb_array_elements(p_items) loop
     begin qty := (it->>'quantity')::int; exception when others then qty := 0; end;
     if qty < 1 or qty > 50 then raise exception 'Invalid quantity'; end if;
-    select id, name, selling_price into rc
+    select id, name, selling_price, sold_out_date into rc
       from public.recipes
       where id::text = it->>'recipe_id' and is_published = true and restaurant_id = rest.id;
     if not found then raise exception 'An item is no longer on the menu'; end if;
+    if rc.sold_out_date is not null and rc.sold_out_date = (now() at time zone coalesce(rest.timezone, 'Asia/Kolkata'))::date then
+      raise exception 'SOLD_OUT: % is sold out today', rc.name;
+    end if;
     total := total + rc.selling_price * qty;
     lines := lines || jsonb_build_array(
       jsonb_build_object('name', rc.name, 'quantity', qty, 'price', rc.selling_price));
@@ -378,6 +442,15 @@ begin
 
   if total < rest.min_order_value then
     raise exception 'MIN_ORDER: The minimum order is ₹%', trim_scale(rest.min_order_value);
+  end if;
+
+  subtotal := total;
+  if coalesce(trim(p_coupon), '') <> '' then
+    v_code := upper(trim(p_coupon));
+    v_disc := public.coupon_discount(rest.id, v_code, subtotal);   -- raises COUPON: ... when not valid
+    update public.coupons set used = used + 1 where code = v_code and (max_uses is null or used < max_uses);
+    if not found then raise exception 'COUPON: This code is not valid'; end if;
+    total := total - v_disc;
   end if;
 
   if coalesce(trim(p_notes), '') <> '' then
@@ -388,8 +461,8 @@ begin
   loop
     num := rest.order_prefix || '-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
     begin
-      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method)
-      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment);
+      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method, coupon_code, discount)
+      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment, v_code, v_disc);
       exit;
     exception when unique_violation then
       tries := tries + 1;
@@ -397,10 +470,10 @@ begin
     end;
   end loop;
 
-  return jsonb_build_object('order_number', num, 'total', total, 'restaurant', rest.name, 'items', lines, 'delivery_date', p_delivery_date);
+  return jsonb_build_object('order_number', num, 'total', total, 'subtotal', subtotal, 'discount', v_disc, 'coupon', v_code, 'restaurant', rest.name, 'items', lines, 'delivery_date', p_delivery_date);
 end $$;
-revoke all on function public.place_order(text, text, text, text, text, text, jsonb, date) from public;
-grant execute on function public.place_order(text, text, text, text, text, text, jsonb, date) to anon, authenticated;
+revoke all on function public.place_order(text, text, text, text, text, text, jsonb, date, text) from public;
+grant execute on function public.place_order(text, text, text, text, text, text, jsonb, date, text) to anon, authenticated;
 
 -- Older app versions (no delivery date): the order goes to the first available day.
 create or replace function public.place_order(
@@ -631,4 +704,126 @@ begin
   exception when duplicate_object then null; end;
   begin alter publication supabase_realtime add table public.restaurants;
   exception when duplicate_object then null; end;
+end $$;
+
+-- ============================================================
+-- 9. Owner alerts: low stock, daily summary, dish photos
+-- ============================================================
+-- One place that sends an alert to a restaurant's phones (web push) and its ntfy topic. Never blocks anything if it fails.
+create or replace function public.send_alert(p_restaurant uuid, p_title text, p_body text, p_tag text)
+returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare c record; topic text;
+begin
+  select function_url, shared_secret into c from public.push_config limit 1;
+  if c.function_url is not null and c.shared_secret is not null then
+    begin
+      perform net.http_post(url := c.function_url,
+        headers := jsonb_build_object('Content-Type', 'application/json', 'x-push-secret', c.shared_secret),
+        body := jsonb_build_object('restaurant_id', p_restaurant, 'title', p_title, 'body', p_body, 'tag', p_tag));
+    exception when others then raise warning 'push alert skipped: %', sqlerrm; end;
+  end if;
+  select alert_topic into topic from public.restaurant_secrets where restaurant_id = p_restaurant;
+  if topic is not null then
+    begin
+      perform net.http_post(url := 'https://ntfy.sh/',
+        body := jsonb_build_object('topic', topic, 'title', p_title, 'message', p_body, 'priority', 3, 'tags', jsonb_build_array('package')));
+    exception when others then raise warning 'ntfy alert skipped: %', sqlerrm; end;
+  end if;
+end $$;
+revoke all on function public.send_alert(uuid, text, text, text) from public, anon, authenticated;
+
+-- Low stock: alert once when an ingredient falls to its reorder level (each restaurant can turn this off in Settings).
+create or replace function public.alert_low_stock()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+declare rname text; enabled boolean;
+begin
+  if new.restaurant_id is null or new.reorder_level is null or new.reorder_level <= 0 then return new; end if;
+  if new.current_stock <= new.reorder_level and old.current_stock > old.reorder_level then
+    select name, low_stock_alerts into rname, enabled from public.restaurants where id = new.restaurant_id;
+    if not coalesce(enabled, true) then return new; end if;   -- this restaurant turned low-stock alerts off
+    perform public.send_alert(new.restaurant_id, 'Low stock · ' || coalesce(rname, 'Kitchen'),
+      new.name || ': ' || trim_scale(new.current_stock)::text || ' ' || coalesce(new.unit, '') || ' left (reorder at ' || trim_scale(new.reorder_level)::text || ')',
+      'stock-' || new.id::text);
+  end if;
+  return new;
+end $$;
+revoke all on function public.alert_low_stock() from public, anon, authenticated;
+drop trigger if exists inventory_low_stock on public.inventory_items;
+create trigger inventory_low_stock after update of current_stock on public.inventory_items
+  for each row execute function public.alert_low_stock();
+
+-- Daily closing summary: orders and sales per restaurant, plus progress toward the goal. Sent at 10:30 pm IST.
+create or replace function public.send_daily_summary()
+returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare r record; c record; g record; body text := ''; tot numeric := 0; goal_total numeric; today date := (now() at time zone 'Asia/Kolkata')::date;
+begin
+  for r in
+    select rs.id, rs.name,
+           coalesce(sum(o.total) filter (where o.status <> 'Cancelled'), 0) as sales,
+           count(o.id) filter (where o.status <> 'Cancelled') as n,
+           count(o.id) filter (where o.status = 'Cancelled') as cancelled
+      from public.restaurants rs
+      left join public.orders o on o.restaurant_id = rs.id and (o.created_at at time zone 'Asia/Kolkata')::date = today
+     group by rs.id, rs.name, rs.sort_order order by rs.sort_order
+  loop
+    tot := tot + r.sales;
+    body := body || r.name || ': ' || r.n || ' order' || case when r.n = 1 then '' else 's' end || ', ₹' || trim_scale(r.sales)::text
+            || case when r.cancelled > 0 then ' (' || r.cancelled || ' cancelled)' else '' end || E'\n';
+    begin   -- ntfy backup: each restaurant's own numbers
+      perform public.send_alert_ntfy_only(r.id, 'Today · ' || r.name, r.n || ' orders, ₹' || trim_scale(r.sales)::text);
+    exception when others then null; end;
+  end loop;
+  body := body || 'Total ₹' || trim_scale(tot)::text;
+  select * into g from public.sales_goal limit 1;
+  if found then
+    select coalesce(sum(total), 0) into goal_total from public.orders where status <> 'Cancelled' and (created_at at time zone 'Asia/Kolkata')::date >= g.start_date;
+    body := body || E'\n' || g.name || ': ' || floor(goal_total * 100 / g.target)::text || '% (₹' || trim_scale(goal_total)::text || ' of ₹' || trim_scale(g.target)::text || ')';
+  end if;
+  select function_url, shared_secret into c from public.push_config limit 1;
+  if c.function_url is not null and c.shared_secret is not null then
+    begin
+      perform net.http_post(url := c.function_url,
+        headers := jsonb_build_object('Content-Type', 'application/json', 'x-push-secret', c.shared_secret),
+        body := jsonb_build_object('all', true, 'title', 'Today''s summary', 'body', body, 'tag', 'daily-summary'));
+    exception when others then raise warning 'daily summary push skipped: %', sqlerrm; end;
+  end if;
+end $$;
+revoke all on function public.send_daily_summary() from public, anon, authenticated;
+
+create or replace function public.send_alert_ntfy_only(p_restaurant uuid, p_title text, p_body text)
+returns void
+language plpgsql security definer set search_path = public, extensions as $$
+declare topic text;
+begin
+  select alert_topic into topic from public.restaurant_secrets where restaurant_id = p_restaurant;
+  if topic is not null then
+    perform net.http_post(url := 'https://ntfy.sh/', body := jsonb_build_object('topic', topic, 'title', p_title, 'message', p_body, 'priority', 2, 'tags', jsonb_build_array('chart_with_upwards_trend')));
+  end if;
+end $$;
+revoke all on function public.send_alert_ntfy_only(uuid, text, text) from public, anon, authenticated;
+
+-- Run the summary every night at 10:30 pm IST (17:00 UTC). Needs the pg_cron extension (Database > Extensions).
+do $$ begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('daily-summary', '0 17 * * *', 'select public.send_daily_summary()');
+exception when others then
+  raise notice 'pg_cron could not be set up here (%). Turn on pg_cron under Database > Extensions, then run this file again to get the daily summary.', sqlerrm;
+end $$;
+
+-- Dish photos: anyone can see them, only signed-in staff can add or change them.
+do $$ begin
+  if exists (select 1 from information_schema.schemata where schema_name = 'storage') then
+    insert into storage.buckets (id, name, public) values ('dish-photos', 'dish-photos', true) on conflict (id) do nothing;
+    execute 'drop policy if exists "Staff can add dish photos" on storage.objects';
+    execute 'create policy "Staff can add dish photos" on storage.objects for insert to authenticated with check (bucket_id = ''dish-photos'')';
+    execute 'drop policy if exists "Staff can change dish photos" on storage.objects';
+    execute 'create policy "Staff can change dish photos" on storage.objects for update to authenticated using (bucket_id = ''dish-photos'') with check (bucket_id = ''dish-photos'')';
+    execute 'drop policy if exists "Staff can remove dish photos" on storage.objects';
+    execute 'create policy "Staff can remove dish photos" on storage.objects for delete to authenticated using (bucket_id = ''dish-photos'')';
+  end if;
+exception when others then
+  raise notice 'Dish photo storage could not be set up here (%). Create a public bucket named dish-photos under Storage.', sqlerrm;
 end $$;

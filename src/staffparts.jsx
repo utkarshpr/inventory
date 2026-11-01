@@ -63,13 +63,14 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear })
 /* This restaurant's own delivery days and WhatsApp group. Changes only affect the selected restaurant. */
 export function RestaurantSettings({ r, secrets, onSave }) {
   const todayIso = zonedNow(r.timezone || 'Asia/Kolkata').date
-  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
+  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', upi: r.upi_id || '', lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
   const [f, setF] = useState(init)
   useEffect(() => { setF(init()) }, [r.id, secrets && secrets.alert_topic])
   const set = (patch) => setF(cur => ({ ...cur, ...patch }))
   const [testMsg, setTestMsg] = useState('')
   const topicOk = !f.topic.trim() || /^[A-Za-z0-9_-]{8,64}$/.test(f.topic.trim())
   const minOk = f.minOrder === '' || Number(f.minOrder) >= 0
+  const upiOk = !f.upi.trim() || /^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/.test(f.upi.trim())
   const makeTopic = () => { const bytes = crypto.getRandomValues(new Uint8Array(10)); set({ topic: `${(r.order_prefix || 'kitchen').toLowerCase()}-${Array.from(bytes, b => (b % 36).toString(36)).join('')}` }); setTestMsg('') }
   const sendTest = async () => {
     setTestMsg('Sending…')
@@ -86,8 +87,8 @@ export function RestaurantSettings({ r, secrets, onSave }) {
   const aheadOptions = [...new Set([1, 2, 3, 5, 7, 10, 14, 21, 30, Number(f.ahead)])].sort((a, b) => a - b)
   const submit = (e) => {
     e.preventDefault()
-    if (customEmpty || !waOk || !topicOk || !minOk) return
-    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
+    if (customEmpty || !waOk || !topicOk || !minOk || !upiOk) return
+    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, upi_id: f.upi.trim() || null, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
   }
   return <form className="panel rset" onSubmit={submit}>
     <div className="panel-heading"><div><h3>Delivery days · {r.name}</h3><p>Customers can only pick these days when ordering. This changes {r.name} only.</p></div></div>
@@ -120,6 +121,11 @@ export function RestaurantSettings({ r, secrets, onSave }) {
       <label className="rset-field">Minimum order (₹)
         <input type="number" min="0" step="1" inputMode="numeric" value={f.minOrder} onChange={e => set({ minOrder: e.target.value })} />
         <small>Customers can't place an order below this amount. 0 means no minimum.</small></label>
+      <label className="rset-check rset-lowstock"><input type="checkbox" aria-label="Low-stock alerts" checked={f.lowStock} onChange={e => set({ lowStock: e.target.checked })} />Alert me when an ingredient runs low <small>A notification once when stock falls to its reorder level. {r.name} only.</small></label>
+      <label className="rset-field">UPI ID for {r.name}
+        <input value={f.upi} onChange={e => set({ upi: e.target.value })} placeholder="e.g. saltsaffron@okaxis" autoCapitalize="none" autoCorrect="off" spellCheck="false" aria-label="UPI ID" aria-invalid={!upiOk} />
+        <small>Customers who choose UPI get a "Pay with UPI" button for this ID. Leave empty to hide it. Each restaurant has its own.</small></label>
+      {!upiOk && <p className="rset-warn" role="alert">That doesn't look like a UPI ID. It looks like name@bank.</p>}
       {!minOk && <p className="rset-warn" role="alert">The minimum order can't be negative.</p>}
 
       <div className="rset-alerts">
@@ -306,5 +312,97 @@ export function GoalCard({ goal, onSave }) {
         <div className="cancel-actions"><button type="button" className="text-btn" onClick={() => setEditing(false)}>Cancel</button><button className="primary app-btn" disabled={!valid}>Save goal</button></div>
       </form>
     </div>}
+  </section>
+}
+
+/* ---------- Coupon codes (both restaurants, or one) ---------- */
+const couponText = (c, restaurants) => {
+  const where = c.restaurant_id ? ((restaurants.find(r => r.id === c.restaurant_id) || {}).name || 'One restaurant') : 'Both restaurants'
+  const off = c.kind === 'percent' ? `${Number(c.value)}% off${c.max_discount ? ` (max ₹${Number(c.max_discount)})` : ''}` : `₹${Number(c.value)} off`
+  return [off, Number(c.min_order) > 0 ? `min order ₹${Number(c.min_order)}` : '', where, c.expires_on ? `expires ${new Date(c.expires_on + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : '', `used ${c.used}${c.max_uses ? ` of ${c.max_uses}` : ''}`].filter(Boolean).join(' · ')
+}
+export function CouponsSettings({ restaurants, notify }) {
+  const [list, setList] = useState(null)
+  const blank = { code: '', where: '', kind: 'percent', value: '', max: '', min: '', expires: '', uses: '' }
+  const [f, setF] = useState(blank), [err, setErr] = useState('')
+  const set = (patch) => setF(cur => ({ ...cur, ...patch }))
+  useEffect(() => { if (!supabase) return setList([]); let alive = true; supabase.from('coupons').select('*').order('created_at', { ascending: false }).then(({ data }) => { if (alive) setList(data || []) }); return () => { alive = false } }, [])
+  const num = (v) => v === '' ? null : Number(v)
+  const add = async (e) => {
+    e.preventDefault(); setErr('')
+    const code = f.code.trim().toUpperCase(), value = Number(f.value)
+    if (!/^[A-Z0-9]{3,20}$/.test(code)) return setErr('The code needs 3 to 20 letters or numbers, no spaces.')
+    if (!(value > 0) || (f.kind === 'percent' && value > 100)) return setErr(f.kind === 'percent' ? 'A percentage must be between 1 and 100.' : 'Enter the rupees off.')
+    for (const [v, label] of [[f.max, 'maximum discount'], [f.min, 'minimum order'], [f.uses, 'number of uses']]) if (v !== '' && !(Number(v) >= 0)) return setErr(`Check the ${label}.`)
+    if (list && list.some(c => c.code === code)) return setErr('That code already exists.')
+    const row = { code, restaurant_id: f.where || null, kind: f.kind, value, max_discount: f.kind === 'percent' && f.max !== '' && Number(f.max) > 0 ? Number(f.max) : null, min_order: num(f.min) || 0, expires_on: f.expires || null, max_uses: f.uses !== '' && Number(f.uses) > 0 ? Number(f.uses) : null }
+    if (supabase) { const { data, error } = await supabase.from('coupons').insert(row).select().single(); if (error) return setErr(error.message); setList(l => [data, ...(l || [])]) } else setList(l => [{ id: String(Date.now()), used: 0, is_active: true, ...row }, ...(l || [])])
+    setF(blank); notify && notify(`Coupon ${code} added`)
+  }
+  const toggle = async (c) => { if (supabase) { const { error } = await supabase.from('coupons').update({ is_active: !c.is_active }).eq('id', c.id); if (error) return notify && notify(error.message) } setList(l => l.map(x => x.id === c.id ? { ...x, is_active: !c.is_active } : x)) }
+  const remove = async (c) => { if (supabase) { const { error } = await supabase.from('coupons').delete().eq('id', c.id); if (error) return notify && notify(error.message) } setList(l => l.filter(x => x.id !== c.id)); notify && notify(`Coupon ${c.code} deleted`) }
+  return <section className="panel couponcard" aria-label="Coupon codes">
+    <div className="panel-heading"><div><h3>Coupon codes</h3><p>Customers type a code at checkout. The discount is worked out on the server, so it can't be changed in the browser.</p></div></div>
+    <form className="rset-body" onSubmit={add}>
+      <div className="rset-row">
+        <label className="rset-field">Code<input aria-label="Coupon code name" value={f.code} onChange={e => set({ code: e.target.value.toUpperCase() })} placeholder="WELCOME50" maxLength={20} autoCapitalize="characters" /></label>
+        <label className="rset-field">Works at<select aria-label="Coupon applies to" value={f.where} onChange={e => set({ where: e.target.value })}><option value="">Both restaurants</option>{restaurants.map(r => <option key={r.id} value={r.id}>{r.name} only</option>)}</select></label>
+      </div>
+      <div className="rset-row">
+        <label className="rset-field">Type<select aria-label="Coupon type" value={f.kind} onChange={e => set({ kind: e.target.value })}><option value="percent">Percent off</option><option value="flat">Rupees off</option></select></label>
+        <label className="rset-field">{f.kind === 'percent' ? 'Percent' : 'Rupees'}<input aria-label="Coupon value" inputMode="decimal" value={f.value} onChange={e => set({ value: e.target.value })} placeholder={f.kind === 'percent' ? '10' : '50'} /></label>
+        {f.kind === 'percent' && <label className="rset-field">Max discount (₹)<input aria-label="Coupon max discount" inputMode="numeric" value={f.max} onChange={e => set({ max: e.target.value })} placeholder="optional" /></label>}
+      </div>
+      <div className="rset-row">
+        <label className="rset-field">Minimum order (₹)<input aria-label="Coupon minimum order" inputMode="numeric" value={f.min} onChange={e => set({ min: e.target.value })} placeholder="0" /></label>
+        <label className="rset-field">Expires on<input type="date" aria-label="Coupon expiry" value={f.expires} onChange={e => set({ expires: e.target.value })} /></label>
+        <label className="rset-field">Total uses<input aria-label="Coupon total uses" inputMode="numeric" value={f.uses} onChange={e => set({ uses: e.target.value })} placeholder="no limit" /></label>
+      </div>
+      {err && <p className="lset-warn" role="alert">{err}</p>}
+      <button className="primary app-btn">Add coupon</button>
+    </form>
+    <ul className="coupon-list">{(list || []).map(c => <li key={c.id} className={c.is_active ? 'coupon-row' : 'coupon-row off'}>
+      <div><b>{c.code}</b><small>{couponText(c, restaurants)}</small></div>
+      <div className="coupon-act"><button type="button" role="switch" aria-checked={c.is_active} aria-label={`${c.code} active`} className={c.is_active ? 'switch on ok' : 'switch'} onClick={() => toggle(c)}><i /></button><button type="button" className="text-btn" onClick={() => remove(c)}>Delete</button></div>
+    </li>)}{list && !list.length && <li className="coupon-empty">No coupons yet.</li>}</ul>
+  </section>
+}
+
+/* ---------- Backup: download your data ---------- */
+const csvCell = (v) => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
+const toCsv = (rows) => '\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\r\n')
+const download = (name, text, type) => { const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
+const itemsText = (items) => (Array.isArray(items) ? items : []).map(i => typeof i === 'string' ? i : `${i.quantity} × ${i.name}`).join('; ')
+export function BackupCard({ restaurants, notify }) {
+  const [busy, setBusy] = useState('')
+  const stamp = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+  const nameOf = (id) => (restaurants.find(r => r.id === id) || {}).name || ''
+  const get = async (table, select = '*') => { const { data, error } = await supabase.from(table).select(select); if (error) throw new Error(`${table}: ${error.message}`); return data || [] }
+  const run = async (kind) => {
+    if (!supabase) return notify && notify('Backups need Supabase')
+    setBusy(kind)
+    try {
+      if (kind === 'orders') {
+        const o = (await get('orders')).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))
+        download(`orders-${stamp}.csv`, toCsv([['Restaurant', 'Order number', 'Placed at (IST)', 'Delivery date', 'Status', 'Customer', 'Phone', 'Address', 'Payment', 'Items', 'Coupon', 'Discount', 'Total', 'Cancel reason'],
+          ...o.map(x => [nameOf(x.restaurant_id), x.order_number, new Date(x.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }), x.delivery_date, x.status, x.customer_name, x.customer_phone, x.delivery_address, x.payment_method, itemsText(x.items), x.coupon_code, x.discount, x.total, x.cancel_reason])]), 'text/csv')
+      } else if (kind === 'menu') {
+        const r = await get('recipes', '*, recipe_ingredients(*)')
+        download(`menu-recipes-${stamp}.csv`, toCsv([['Restaurant', 'Dish', 'Category', 'Price', 'Food cost %', 'Prep minutes', 'On menu', 'Ingredients', 'Method'],
+          ...r.map(x => [nameOf(x.restaurant_id), x.name, x.category, x.selling_price, x.food_cost, x.prep_minutes, x.is_published ? 'yes' : 'no', (x.recipe_ingredients || []).map(i => `${i.quantity ?? ''} ${i.unit ?? ''} ${i.ingredient_name ?? ''}`.trim()).join('; '), String(x.instructions || '').replace(/\n/g, ' | ')])]), 'text/csv')
+      } else if (kind === 'stock') {
+        const s = await get('inventory_items')
+        download(`stock-${stamp}.csv`, toCsv([['Restaurant', 'Item', 'In stock', 'Unit', 'Reorder level', 'Unit cost'], ...s.map(x => [nameOf(x.restaurant_id), x.name, x.current_stock, x.unit, x.reorder_level, x.unit_cost])]), 'text/csv')
+      } else {
+        const [orders, recipes, stock, goal, coupons] = await Promise.all([get('orders'), get('recipes', '*, recipe_ingredients(*)'), get('inventory_items'), get('sales_goal'), get('coupons')])
+        download(`kitchen-backup-${stamp}.json`, JSON.stringify({ exported_at: new Date().toISOString(), restaurants, orders, recipes, inventory_items: stock, sales_goal: goal, coupons }, null, 2), 'application/json')
+      }
+      notify && notify('Download started')
+    } catch (e) { notify && notify(`Could not download: ${e.message}`) } finally { setBusy('') }
+  }
+  const btn = (kind, label) => <button type="button" className="text-btn backup-btn" disabled={Boolean(busy)} onClick={() => run(kind)}>{busy === kind ? 'Preparing…' : label}</button>
+  return <section className="panel backupcard" aria-label="Backup">
+    <div className="panel-heading"><div><h3>Backup · download your data</h3><p>Both restaurants together. Spreadsheets open in Excel or Google Sheets. The full backup keeps everything in one file.</p></div></div>
+    <div className="rset-body backup-row">{btn('orders', 'Orders (spreadsheet)')}{btn('menu', 'Menu & recipes (spreadsheet)')}{btn('stock', 'Stock (spreadsheet)')}{btn('full', 'Full backup (file)')}</div>
   </section>
 }
