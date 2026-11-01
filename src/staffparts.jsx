@@ -45,7 +45,7 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear })
       return <article key={a.key} className="oa-card" style={themeStyle(r && r.slug)}>
         <header className="oa-head">
           {r ? <Mark r={r} size={30} /> : <span />}
-          <span className="oa-new">New order</span>
+          <span className="oa-new">New order{r ? ` · ${r.name}` : ''}</span>
           <button type="button" className="oa-x" aria-label="Dismiss" onClick={() => onDismiss(a.key)}>×</button>
         </header>
         <div className="oa-ref"><b>{o.id}</b><span>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
@@ -262,5 +262,49 @@ export function AppInstallCard({ notify, restaurant }) {
         {pushOn ? <button className="text-btn" disabled={pushBusy} onClick={turnPushOff}>Turn off</button> : <button className="primary app-btn" disabled={pushBusy} onClick={turnPushOn}>Turn on</button>}</div>}
       <p className="lset-note">{pushOk ? 'Alerts for a closed app come from the server. The phone alert topic above (ntfy) is a separate backup.' : 'Notifications appear while the app is open or in the background. If the app is fully closed, phone alerts (the topic above, via ntfy) still reach you.'}</p>
     </div>
+  </section>
+}
+
+/* Combined sales of both restaurants against a goal the owner sets (for example "London trip", 1L). */
+const inr = (n) => '₹' + Math.round(Number(n) || 0).toLocaleString('en-IN')
+const short = (n) => { const v = Math.abs(Number(n) || 0); const f = (x, u) => (Math.round(x * 10) / 10).toString().replace(/\.0$/, '') + u; return v >= 1e7 ? '₹' + f(v / 1e7, ' Cr') : v >= 1e5 ? '₹' + f(v / 1e5, 'L') : v >= 1e3 ? '₹' + f(v / 1e3, 'K') : '₹' + Math.round(v) }
+export const parseMoney = (text) => {   // "100000", "1,00,000", "50k", "1L", "1.5 lakh", "2cr"
+  const m = String(text || '').trim().toLowerCase().replace(/[₹,\s]/g, '').match(/^(\d+(?:\.\d+)?)(k|l|lac|lakh|lakhs|cr|crore)?$/)
+  if (!m) return NaN
+  const mult = { k: 1e3, l: 1e5, lac: 1e5, lakh: 1e5, lakhs: 1e5, cr: 1e7, crore: 1e7 }[m[2]] || 1
+  return Math.round(Number(m[1]) * mult)
+}
+const GOAL_COLORS = { 'salt-and-saffron': '#B84E24', 'oven-and-chives': '#4F7A57' }
+const GOAL_FALLBACK = ['#B84E24', '#4F7A57', '#C9922F', '#5B6EAE']
+
+export function GoalCard({ goal, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(''), [target, setTarget] = useState(''), [start, setStart] = useState('')
+  const open = () => { setName(goal.name); setTarget(String(goal.target)); setStart(goal.start_date); setEditing(true) }
+  const targetNum = parseMoney(target), valid = name.trim().length > 0 && targetNum > 0 && /^\d{4}-\d{2}-\d{2}$/.test(start)
+  const total = Number(goal.total) || 0, tgt = Number(goal.target) || 1
+  const pct = Math.min(100, Math.floor((total / tgt) * 100)), done = total >= tgt
+  const parts = (goal.by_restaurant || []).map((r, i) => ({ ...r, sales: Number(r.sales) || 0, color: GOAL_COLORS[r.slug] || GOAL_FALLBACK[i % GOAL_FALLBACK.length] }))
+  const save = (e) => { e.preventDefault(); if (!valid) return; onSave({ name: name.trim(), target: targetNum, start_date: start }); setEditing(false) }
+  return <section className="panel goalcard" aria-label="Sales goal">
+    <div className="goal-head">
+      <div><span className="hero-kicker goal-kicker">SALES GOAL</span><h3 className="goal-name">{goal.name}</h3></div>
+      <button className="text-btn" onClick={open}>Edit goal</button>
+    </div>
+    <div className="goal-line"><b className="goal-pct">{pct}%</b><span>{done ? 'You got it! 🎉' : `${short(total)} of ${short(tgt)}`}</span></div>
+    <div className="goal-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={`${goal.name}: ${pct}% of the goal`}>
+      {parts.map(p => <span key={p.restaurant_id} className="goal-seg" style={{ width: `${Math.min(100, (p.sales / tgt) * 100)}%`, background: p.color }} title={`${p.name} ${inr(p.sales)}`} />)}
+    </div>
+    <div className="goal-parts">{parts.map(p => <span key={p.restaurant_id}><i style={{ background: p.color }} />{p.name} <b>{short(p.sales)}</b></span>)}</div>
+    <p className="goal-note">{done ? `Goal reached with ${inr(total)}.` : `${inr(tgt - total)} to go.`} Sales since {new Date(goal.start_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}, both restaurants together, cancelled orders left out.</p>
+    {editing && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Edit goal" onClick={e => e.target === e.currentTarget && setEditing(false)}>
+      <form className="modal goal-form" onSubmit={save}>
+        <h3>Sales goal</h3>
+        <label>What are you saving for?<input value={name} onChange={e => setName(e.target.value)} maxLength={40} placeholder="e.g. London trip" aria-label="Goal name" /></label>
+        <label>Target amount<input value={target} onChange={e => setTarget(e.target.value)} inputMode="text" placeholder="e.g. 1L or 100000" aria-label="Goal target" aria-invalid={!(targetNum > 0)} /><small>{targetNum > 0 ? inr(targetNum) : 'Type a number. You can use K, L (lakh) or Cr, like 50K or 1L.'}</small></label>
+        <label>Count sales from<input type="date" value={start} onChange={e => setStart(e.target.value)} aria-label="Goal start date" /></label>
+        <div className="cancel-actions"><button type="button" className="text-btn" onClick={() => setEditing(false)}>Cancel</button><button className="primary app-btn" disabled={!valid}>Save goal</button></div>
+      </form>
+    </div>}
   </section>
 }

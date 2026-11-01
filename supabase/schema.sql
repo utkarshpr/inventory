@@ -174,6 +174,38 @@ drop policy if exists "Staff can manage order limits" on public.order_limits;
 create policy "Staff can manage order limits" on public.order_limits
   for all to authenticated using (true) with check (true);
 
+-- Sales goal shared by both restaurants (for example "London trip", target 1,00,000).
+create table if not exists public.sales_goal (
+  id boolean primary key default true check (id),
+  name text not null default 'Sales goal',
+  target numeric not null default 100000 check (target > 0),
+  start_date date not null default ((now() at time zone 'Asia/Kolkata')::date)
+);
+insert into public.sales_goal (id) values (true) on conflict (id) do nothing;
+alter table public.sales_goal enable row level security;
+drop policy if exists "Staff can manage the sales goal" on public.sales_goal;
+create policy "Staff can manage the sales goal" on public.sales_goal
+  for all to authenticated using (true) with check (true);
+
+-- Progress toward the goal: sales (orders that are not cancelled) since the start date, per restaurant and combined.
+create or replace function public.goal_progress()
+returns jsonb
+language sql stable security invoker set search_path = public as $$
+  select jsonb_build_object(
+    'name', g.name, 'target', g.target, 'start_date', g.start_date,
+    'total', coalesce((select sum(o.total) from public.orders o
+                        where o.status <> 'Cancelled' and (o.created_at at time zone 'Asia/Kolkata')::date >= g.start_date), 0),
+    'by_restaurant', (select coalesce(jsonb_agg(jsonb_build_object('restaurant_id', r.id, 'name', r.name, 'slug', r.slug,
+                              'sales', coalesce(s.sales, 0), 'orders', coalesce(s.n, 0)) order by r.sort_order), '[]'::jsonb)
+                        from public.restaurants r
+                        left join (select o.restaurant_id, sum(o.total) as sales, count(*) as n from public.orders o
+                                    where o.status <> 'Cancelled' and (o.created_at at time zone 'Asia/Kolkata')::date >= g.start_date
+                                    group by o.restaurant_id) s on s.restaurant_id = r.id))
+  from public.sales_goal g limit 1;
+$$;
+revoke all on function public.goal_progress() from public, anon;
+grant execute on function public.goal_progress() to authenticated;
+
 -- Private per-restaurant settings. Staff only: the phone-alert topic is a secret, so it must not live in the public restaurants table.
 create table if not exists public.restaurant_secrets (
   restaurant_id uuid primary key references public.restaurants(id) on delete cascade,

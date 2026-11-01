@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { supabase } from './supabase'
 import { useRestaurants, themeStyle, Mark, zonedNow, addDaysIso, dayLabel, dateText, deliveryText } from './restaurants'
-import { RestaurantSwitcher, OpenToggle, OrderAlerts, RestaurantSettings, LiveStrip, OrderLimitsSettings, AppInstallCard, systemNotify } from './staffparts'
+import { RestaurantSwitcher, OpenToggle, OrderAlerts, RestaurantSettings, LiveStrip, OrderLimitsSettings, AppInstallCard, systemNotify, GoalCard } from './staffparts'
 import './styles.css'
 import './staff.css'
 import { PublicRouter, AdminLogin, copyText } from './public'
@@ -129,9 +129,11 @@ function App() {
   const [activeSlug, setActiveSlug] = useState(() => { try { return localStorage.getItem('active-restaurant') || '' } catch { return '' } })
   const active = (restaurants || []).find(r => r.slug === activeSlug) || (restaurants || [])[0] || null
   const activeRef = useRef(null); activeRef.current = active
+  const restaurantsRef = useRef([]); restaurantsRef.current = restaurants
+  const alertedRef = useRef(new Set()), lastSeenRef = useRef(Date.now())
   const todayIso = active ? zonedNow(active.timezone || 'Asia/Kolkata').date : ''
   const [alerts, setAlerts] = useState([]), [highlight, setHighlight] = useState(''), [closeDialog, setCloseDialog] = useState(null)
-  const [live, setLive] = useState(true), [audioOk, setAudioOk] = useState(audioReady()), [secrets, setSecrets] = useState(null), [limits, setLimits] = useState(null)
+  const [live, setLive] = useState(true), [audioOk, setAudioOk] = useState(audioReady()), [secrets, setSecrets] = useState(null), [limits, setLimits] = useState(null), [goal, setGoal] = useState(null)
   const [awake, setAwake] = useState(() => { try { return localStorage.getItem('keep-awake') !== '0' } catch { return true } })
   const awakeSupported = typeof navigator !== 'undefined' && 'wakeLock' in navigator
   const knownRef = useRef(null), liveRef = useRef(true), lastLoadRef = useRef(0)
@@ -162,6 +164,14 @@ function App() {
     document.addEventListener('visibilitychange', catchUp); window.addEventListener('online', catchUp)
     return () => { document.removeEventListener('visibilitychange', catchUp); window.removeEventListener('online', catchUp) }
   }, [Boolean(session)])
+  const loadGoal = () => { if (!supabase) return; supabase.rpc('goal_progress').then(({ data }) => { if (data) setGoal(data) }) }
+  useEffect(() => {   // combined sales goal: refresh on the overview, when this restaurant's orders change, and every minute
+    if (!session || page !== 'Overview') return
+    loadGoal()
+    const t = setInterval(loadGoal, 60000)
+    return () => clearInterval(t)
+  }, [page === 'Overview', Boolean(session), orders.length, orders.map(o => o.status).join('')])
+  const saveGoal = async (fields) => { if (supabase) { const { error } = await supabase.from('sales_goal').upsert({ id: true, ...fields }); if (error) return notify(`Could not save the goal: ${error.message}`) } loadGoal(); notify('Goal saved') }
   useEffect(() => {   // order limits (shared by both restaurants) for the settings page
     if (!session || page !== 'Settings') return
     const defaults = { per_phone_hour: 3, per_phone_day: 8, per_connection_hour: 20 }
@@ -193,6 +203,26 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
     return () => subscription.unsubscribe()
   }, [])
+  // A new customer order alerts staff whichever restaurant is open. The alert names the restaurant it is for.
+  const raiseAlert = (order, rest) => {
+    if (alertedRef.current.has(order.id)) return
+    alertedRef.current.add(order.id)
+    setAlerts(a => [{ key: order.id + '-' + Date.now(), restaurantId: rest.id, order, lines: orderLines(order), today: zonedNow(rest.timezone || 'Asia/Kolkata').date }, ...a].slice(0, 8))
+    if (soundRef.current) playBeep()
+    systemNotify(order, rest.name)
+    if (document.hidden) document.title = `🔔 New order · ${rest.name}`
+  }
+  const catchUpOthers = async (activeId) => {   // orders for the other restaurant that arrived while we were away or offline
+    if (!supabase) return
+    const since = new Date(lastSeenRef.current - 120000).toISOString()
+    const { data, error } = await supabase.from('orders').select('*').eq('channel', 'Customer form').eq('status', 'New').gt('created_at', since)
+    if (error || !data) return
+    data.filter(o => o.restaurant_id !== activeId).forEach(o => { const rest = restaurantsRef.current.find(x => x.id === o.restaurant_id); if (rest) raiseAlert(mapOrder(o), rest) })
+  }
+  useEffect(() => {   // remember when we were last connected, so a catch-up knows how far back to look
+    const t = setInterval(() => { if (liveRef.current) lastSeenRef.current = Date.now() }, 30000)
+    return () => clearInterval(t)
+  }, [])
   useEffect(() => {
     if (!supabase || !session || !active || !active.id) return
     const rid = active.id
@@ -210,13 +240,12 @@ function App() {
         const prev = knownRef.current
         if (prev && prev.restaurantId === rid) {   // a reload after being away or offline: alert for customer orders we have not seen yet
           const fresh = mapped.filter(o => !prev.ids.has(o.id) && o.channel === 'Customer form' && o.status === 'New')
-          if (fresh.length) {
-            const rest = activeRef.current, todayFor = zonedNow((rest && rest.timezone) || 'Asia/Kolkata').date
-            setAlerts(a => [...fresh.map(o => ({ key: o.id + '-' + Date.now(), restaurantId: rid, order: o, lines: orderLines(o), today: todayFor })), ...a].slice(0, 8))
-            if (soundRef.current) playBeep()
-            fresh.forEach(o => systemNotify(o, (rest && rest.name) || 'Kitchen'))
-          }
+          const rest = activeRef.current
+          if (rest) fresh.forEach(o => raiseAlert(o, rest))
+          catchUpOthers(rid)
         }
+        mapped.forEach(o => alertedRef.current.add(o.id))   // already on screen, so never alert for these later
+        lastSeenRef.current = Date.now()
         knownRef.current = { restaurantId: rid, ids: new Set(mapped.map(o => o.id)) }
         setOrders(mapped)
       }
@@ -235,16 +264,14 @@ function App() {
     const channel = supabase.channel('kitchen-live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders' }, payload => {
         const o = payload.new, mapped = mapOrder(o)
+        lastSeenRef.current = Date.now()
+        const owner = restaurantsRef.current.find(x => x.id === o.restaurant_id)
+        if (!owner) return
+        if (o.channel === 'Customer form') raiseAlert(mapped, owner)   // alerts for BOTH restaurants, whichever one is open
         const rest = activeRef.current
-        if (!rest || o.restaurant_id !== rest.id) return   // the other restaurant's orders never reach this screen: no popup, sound, badge or tab alert
+        if (!rest || o.restaurant_id !== rest.id) return   // the order list, badges and stock only ever show the open restaurant
         setOrders(current => current.some(x => x.id === mapped.id) ? current : [{ ...mapped, time: 'Just now' }, ...current])
         if (knownRef.current && knownRef.current.restaurantId === rest.id) knownRef.current.ids.add(mapped.id)
-        if (o.channel === 'Customer form') {
-          setAlerts(a => [{ key: o.order_number + '-' + Date.now(), restaurantId: o.restaurant_id, order: mapped, lines: orderLines(mapped), today: zonedNow(rest.timezone || 'Asia/Kolkata').date }, ...a].slice(0, 8))
-          if (soundRef.current) playBeep()
-          systemNotify(mapped, rest.name)
-          if (document.hidden) document.title = `🔔 New order · ${rest.name}`
-        }
         refreshInventory()
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, payload => { const o = payload.new; if (activeRef.current && o.restaurant_id && o.restaurant_id !== activeRef.current.id) return; setOrders(current => current.map(x => x.id === o.order_number ? { ...x, status:o.status, total:Number(o.total) } : x)) })
@@ -280,13 +307,13 @@ function App() {
   const saveInventory = async (e) => { e.preventDefault(); const record = readInventoryForm(e.currentTarget); let id = Date.now(); if (supabase) { const { data, error } = await supabase.from('inventory_items').insert({ ...record, restaurant_id: active.id }).select().single(); if (error) return notify(`Could not save ingredient: ${error.message}`); id = data.id } setInventory(list => [...list.filter(i => i.id !== id), toItem(id, record)].sort((a, b) => a.name.localeCompare(b.name))); setModal(null); notify('Ingredient saved') }
   const updateInventory = async (e) => { e.preventDefault(); const record = readInventoryForm(e.currentTarget); if (supabase) { const { error } = await supabase.from('inventory_items').update({ ...record, updated_at: new Date().toISOString() }).eq('id', editingItem.id); if (error) return notify(`Could not update ingredient: ${error.message}`) } setInventory(list => list.map(i => i.id === editingItem.id ? toItem(editingItem.id, record) : i).sort((a, b) => a.name.localeCompare(b.name))); setEditingItem(null); notify('Ingredient updated') }
   const deleteInventory = async () => { if (!window.confirm(`Delete "${editingItem.name}"?`)) return; if (supabase) { const { error } = await supabase.from('inventory_items').delete().eq('id', editingItem.id); if (error) return notify(`Could not delete ingredient: ${error.message}`) } setInventory(list => list.filter(i => i.id !== editingItem.id)); setEditingItem(null); notify('Ingredient deleted') }
-  const pickRestaurant = (slug) => { setActiveSlug(slug); try { localStorage.setItem('active-restaurant', slug) } catch { /* optional */ } setAlerts([]); setModal(null); setEditingOrder(null); setEditingRecipe(null); setEditingItem(null); setCloseDialog(null); setQuery(''); setChannelFilter('All channels'); setDateFilter('All dates'); setHighlight('') }
+  const pickRestaurant = (slug) => { setActiveSlug(slug); try { localStorage.setItem('active-restaurant', slug) } catch { /* optional */ } setModal(null); setEditingOrder(null); setEditingRecipe(null); setEditingItem(null); setCloseDialog(null); setQuery(''); setChannelFilter('All channels'); setDateFilter('All dates'); setHighlight('') }
   const setOpen = async (open, message) => { if (supabase) { const { error } = await supabase.from('restaurants').update({ is_open: open, closed_message: open ? null : (message || null) }).eq('id', active.id); if (error) return notify(`Could not update ${active.name}: ${error.message}`) } setRestaurants(list => list.map(r => r.id === active.id ? { ...r, is_open: open, closed_message: open ? null : (message || null) } : r)); notify(`${active.name} is now ${open ? 'open' : 'closed'}`) }
   const saveRestaurantSettings = async (fields, secretFields) => { if (supabase) { const { error } = await supabase.from('restaurants').update(fields).eq('id', active.id); if (error) return notify(`Could not save settings: ${error.message}`); if (secretFields) { const { error: secretError } = await supabase.from('restaurant_secrets').upsert({ restaurant_id: active.id, ...secretFields }); if (secretError) return notify(`Saved, but phone alerts failed: ${secretError.message}`); setSecrets(secretFields) } } setRestaurants(list => list.map(r => r.id === active.id ? { ...r, ...fields } : r)); notify(`Settings saved for ${active.name}`) }
   const saveLimits = async (fields) => { if (supabase) { const { error } = await supabase.from('order_limits').upsert({ id: true, ...fields }); if (error) return notify(`Could not save the order limits: ${error.message}`) } setLimits(l => ({ ...l, ...fields })); notify('Order limits saved') }
   const toggleOpen = () => active.is_open ? setCloseDialog({ message: '' }) : setOpen(true)
   const dismissAlert = (key) => setAlerts(a => a.filter(x => x.key !== key))
-  const viewAlert = (a) => { setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
+  const viewAlert = (a) => { const r = restaurants.find(x => x.id === a.restaurantId); if (r && (!active || r.id !== active.id)) pickRestaurant(r.slug); setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
   ticketBrand.name = active ? active.name : ''
   const todayOrders = orders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = orders.filter(o => daysAgo(o.createdAt, 1))
   const today = analyse(todayOrders, recipeList), yesterday = analyse(yesterdayOrders, recipeList)
@@ -313,6 +340,7 @@ function App() {
       <header><div><p className="eyebrow">{todayLabel}</p><h1>{page === 'Overview' ? `${greeting}, Utkarsh.` : page}</h1></div><div className="header-actions"><button className="icon-btn desktop-only" onClick={() => { setPage('Orders'); setTimeout(()=>document.querySelector('.search input')?.focus(),0) }} aria-label="Search orders"><Icon name="search"/></button><button className={soundOn ? 'icon-btn notification' : 'icon-btn notification muted'} onClick={() => { setSoundOn(on => !on); notify(soundOn ? 'New-order sound off' : 'New-order sound on') }} title={soundOn ? 'New-order sound is on' : 'New-order sound is off'} aria-label="Toggle new-order sound"><Icon name="bell"/>{soundOn && <i/>}</button><button className="icon-btn mobile-only" onClick={() => setPage('Settings')} aria-label="Settings"><Icon name="gear"/></button><button className="icon-btn mobile-only" onClick={() => supabase.auth.signOut()} aria-label="Sign out"><Icon name="logout"/></button><button className="primary" onClick={() => setModal('order')}><Icon name="plus" size={17}/> New order</button></div></header>
       <div key={page + (active ? active.slug : '')} className="page-in">{page === 'Overview' ? <>
         <section className="hero"><div><span className="hero-kicker">TODAY’S PULSE</span><h2>Keep the kitchen moving.</h2><p>You have <b>{activeCount} active order{activeCount === 1 ? '' : 's'}</b>{lowStock.length ? ` and ${lowStock.length} ingredient${lowStock.length === 1 ? '' : 's'} running low.` : ' and your stock levels look healthy.'}</p><button onClick={() => setPage('Orders')}>View active orders <Icon name="arrow" size={16}/></button></div><div className="hero-doodles"><span>✦</span><strong>☀</strong><i>✳</i></div></section>
+        {goal && <GoalCard goal={goal} onSave={saveGoal}/>}
         <section className="stats"><Stat label="Today's sales" value={`₹${today.sales.toLocaleString('en-IN')}`} change={pct(today.sales, yesterday.sales)}/><Stat label="Orders" value={today.count} change={pct(today.count, yesterday.count)}/><Stat label="Avg. order value" value={`₹${today.aov}`} change={pct(today.aov, yesterday.aov)}/><Stat label="Food cost" value={`${today.foodPct}%`} change={yesterday.sales ? `${today.foodPct <= yesterday.foodPct ? '↓' : '↑'} ${Math.abs(Math.round((today.foodPct - yesterday.foodPct) * 10) / 10)}%` : 'est.'} good={today.foodPct <= yesterday.foodPct}/></section>
         <section className="content-grid"><div className="panel orders-panel"><div className="panel-heading"><div><h3>Live orders <span className="live-dot">●</span></h3><p>Orders requiring attention</p></div><button className="text-btn" onClick={() => setPage('Orders')}>See all <Icon name="arrow" size={15}/></button></div><OrderTable orders={sortByDelivery(orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled'), todayIso).slice(0,3)} onStatus={requestStatus} onEdit={setEditingOrder} formatItems={formatItems} highlight={highlight} today={todayIso}/></div><div className="panel insights"><div className="panel-heading"><div><h3>Kitchen insights</h3><p>Things worth your attention</p></div><button className="more" title="Refresh data" aria-label="Refresh data" onClick={() => { reloadRef.current && reloadRef.current(); notify('Data refreshed') }}><Icon name="more"/></button></div>{lowStock.slice(0, 2).map(i => <div className="insight amber" key={i.id}><span>⚠</span><div><b>{i.name} running low</b><p>{i.stock} {i.unit} left · reorder at {i.reorder} {i.unit}</p></div><button onClick={() => setPage('Inventory')}>View</button></div>)}{today.dishes[0] ? <div className="insight lilac"><span>↗</span><div><b>{today.dishes[0].name} is leading today</b><p>{today.dishes[0].qty} sold so far today.</p></div></div> : null}{!lowStock.length && !today.dishes[0] && <div className="insight lilac"><span>✓</span><div><b>All quiet</b><p>Stock looks healthy and no orders yet today.</p></div></div>}<div className="prep"><div><span>ORDER PROGRESS</span><b>{progressPct}% delivered</b></div><div className="progress"><i style={{ width: `${progressPct}%` }}/></div><p>{deliveredToday} of {todayOrders.length} orders today delivered</p></div></div></section>
         <section className="recipe-section"><div className="section-title"><div><h2>Menu intelligence</h2><p>Recipes at a glance — keep your margins healthy.</p></div><button className="text-btn" onClick={() => setPage('Recipes')}>Recipe library <Icon name="arrow" size={15}/></button></div><div className="recipe-cards">{recipeList.slice(0,3).map(r => <RecipeCard key={r.id} r={r} onClick={() => { setSelectedRecipe(r); setPage('Recipes') }}/>)}</div></section>

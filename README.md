@@ -111,3 +111,4 @@ This is optional and free. A new customer order reaches staff phones even when t
 6. On each staff phone: open the site, install the app, then Settings → App & notifications → "Alerts when the app is closed" → Turn on. Do it once for each restaurant that phone should hear about.
 
 The ntfy topic in Settings keeps working as a separate backup.
+- **Sales goal** (Overview): combined sales of both restaurants against a goal the owner sets, for example "London trip", ₹1L. A bar shows how far you are, with each restaurant's share. Edit the name, target (type 50K, 1L, 1Cr or a number) and start date with "Edit goal". Cancelled orders are not counted.

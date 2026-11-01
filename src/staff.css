@@ -339,3 +339,20 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .prep-row{box-sizing:border-box;width:100%}
 .app-btn{min-height:48px;padding:0 22px}
 .app-btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---- sales goal ---- */
+.goalcard{margin:0 0 18px;padding:18px 20px;box-sizing:border-box}
+.goal-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.goal-kicker{color:var(--muted)}
+.goal-name{margin:2px 0 0;font-size:20px}
+.goal-line{display:flex;align-items:baseline;gap:12px;margin:12px 0 8px}
+.goal-pct{font-size:34px;line-height:1}
+.goal-bar{display:flex;height:18px;border-radius:999px;background:rgba(127,127,127,.22);overflow:hidden}
+.goal-seg{display:block;height:100%;transition:width .8s cubic-bezier(.2,.7,.2,1)}
+.goal-parts{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:10px;font-size:14px}
+.goal-parts i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.goal-note{margin:10px 0 0;color:var(--muted);font-size:13px;line-height:1.45}
+.goal-form{max-width:440px;display:grid;gap:12px}
+.goal-form h3{margin:0}
+.goal-form input{width:100%;box-sizing:border-box}
+@media (prefers-reduced-motion:reduce){.goal-seg{transition:none}}
