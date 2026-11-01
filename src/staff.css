@@ -408,3 +408,12 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
   .app-shell .order-row:has(.pay-confirm){grid-template-areas:"person total" "items items" "status status" "actions actions"}
   .app-shell .order-row:has(.pay-confirm) .row-actions{justify-content:flex-start}
 }
+
+/* ---- payment verification ---- */
+.pay-tag.verify{background:rgba(184,50,33,.16);color:#B83221}
+.pay-txn{margin:0;font-size:14px;line-height:1.5}
+.pay-txn code{font-family:inherit;font-weight:700;letter-spacing:.02em;word-break:break-all}
+.oa-txn{margin:4px 0 0;font-size:14px}
+.oa-txn code{font-family:inherit;font-weight:700;word-break:break-all}
+.oa-verify-actions{display:flex;gap:10px;align-items:center;justify-content:space-between}
+.oa-reject{min-height:44px;padding:0 16px;border-radius:12px;border:1.5px solid currentColor;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}

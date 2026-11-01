@@ -146,9 +146,9 @@ export function TrackOrder({ initialRef, compact, slug }) {
   }, [active, result?.status, result?.payment_status])
   // A UPI order starts with its payment: "Payment confirmation pending" comes first, then the kitchen steps.
   const payFlow = result && (result.payment_status === 'pending' || result.payment_status === 'received')
-  const steps = payFlow ? [['Payment', result.payment_status === 'pending' ? 'Payment confirmation pending' : 'Payment confirmed'], ...STEPS] : STEPS
+  const steps = payFlow ? [['Payment', result.payment_status === 'pending' ? (result.payment_claimed ? 'Payment sent, waiting for verification' : 'Payment confirmation pending') : 'Payment confirmed'], ...STEPS] : STEPS
   const current = result && result.payment_status === 'pending' ? 0 : steps.findIndex(([status]) => status === result?.status)
-  const label = result && result.payment_status === 'pending' ? 'Payment pending' : (steps[current] || [])[1]
+  const label = result && result.payment_status === 'pending' ? (result.payment_claimed ? 'Verifying payment' : 'Payment pending') : (steps[current] || [])[1]
   return <div className="c-track">
     {!compact && <>
       <h2 className="c-h2">Track your order</h2>
@@ -172,7 +172,8 @@ export function TrackOrder({ initialRef, compact, slug }) {
       : <div className="track-result c-result">
           {result.restaurant && <p className="c-rest-chip">{logoFor(result.restaurant_slug) && <img className="c-logo" src={logoFor(result.restaurant_slug)} alt="" width="24" height="24" />}<span>{result.restaurant}</span></p>}
           <div className="c-result-head">{compact ? <span className="c-sub">Order status</span> : <b>{result.order_number}</b>}<span className={result.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{label}</span></div>
-          {result.payment_status === 'pending' && <p className="c-pay-note" role="status"><b>Waiting for your UPI payment to be confirmed.</b> {result.restaurant || 'The kitchen'} starts cooking once the payment is confirmed.</p>}
+          {result.payment_status === 'pending' && <p className="c-pay-note" role="status"><b>{result.payment_claimed ? 'Payment sent. Waiting for verification.' : 'Waiting for your UPI payment to be confirmed.'}</b> {result.restaurant || 'The kitchen'} starts cooking once the payment is confirmed.</p>}
+          {!compact && result.payment_status === 'pending' && <PayClaim orderRef={result.order_number} claimed={Boolean(result.payment_claimed)} reason={result.payment_reject_reason || ''} onDone={() => lookup(result.order_number, true)} />}
           {result.payment_status === 'received' && <p className="c-pay-ok" role="status">Payment confirmed</p>}
           {result.placed_at && <p className="c-sub">Placed {placedText(result.placed_at)}</p>}
           {result.items && result.items.length > 0 && <p className="c-sub c-items">{itemText(result.items)}</p>}
@@ -259,9 +260,11 @@ function OrderPage({ r, list }) {
       if (!data) return
       if (data.status === 'Cancelled') setPayState(null)
       else if (data.payment_status !== 'pending') setPayState({ ref: payState.ref, status: 'received' })
+      else setPayState(s => s && s.status === 'pending' && (s.claimed !== Boolean(data.payment_claimed) || s.reason !== (data.payment_reject_reason || '')) ? { ...s, claimed: Boolean(data.payment_claimed), reason: data.payment_reject_reason || '' } : s)
     }, 5000)
     return () => clearInterval(timer)
   }, [payState && payState.ref, payState && payState.status])
+  const onClaimed = () => setPayState(s => s && ({ ...s, claimed: true, reason: '' }))
   useEffect(() => {   // "Payment confirmed" stays for a moment, then the popup disappears
     if (!payState || payState.status !== 'received') return
     const t = setTimeout(() => setPayState(null), 4500)
@@ -287,7 +290,7 @@ function OrderPage({ r, list }) {
     const ref = data.order_number
     setPlaced({ ref, total: Number(data.total), subtotal: Number(data.subtotal || data.total), discount: Number(data.discount || 0), coupon: data.coupon || '', payment, deliveryDate: data.delivery_date, today, items: (data.items || []).filter(i => !String(i.name).startsWith('Note:')) })
     setDialog(true)
-    setPayState(payment === 'UPI' ? { ref, status: 'pending' } : null)
+    setPayState(payment === 'UPI' ? { ref, status: 'pending', claimed: false, reason: '' } : null)
     try { localStorage.setItem('last-order-ref', ref); localStorage.setItem(`last-order-ref:${r.slug}`, ref) } catch { /* optional */ }
     setQty({}); setNotes(''); setCoupon(null); setCouponText(''); setCouponMsg('')
   }
@@ -315,7 +318,7 @@ function OrderPage({ r, list }) {
             <h2 className="c-h2">Order placed</h2>
             <div className="c-ref-row"><code className="c-ref">{placed.ref}</code><button type="button" className="c-btn c-btn-line" onClick={copyRef}>{copied ? 'Copied' : 'Copy'}</button></div>
             <p className="c-sub">Total {money(placed.total)}{placed.discount > 0 ? ` (code ${placed.coupon} saved you ${money(placed.discount)})` : ''}. Keep this number to track your order.</p>
-            <UpiPay r={r} order={placed} show={Boolean(payState && payState.status === 'pending')} />
+            <UpiPay r={r} order={placed} show={Boolean(payState && payState.status === 'pending')} claimed={Boolean(payState && payState.claimed)} reason={payState ? payState.reason : ''} onClaimed={onClaimed} />
             {placed.deliveryDate && <p className="c-deliver-line">Delivery: {deliveryText(placed.deliveryDate, placed.today)}</p>}
             <WhatsAppLink r={r} className="c-wa" />
             <TrackOrder initialRef={placed.ref} compact />
@@ -375,11 +378,11 @@ function OrderPage({ r, list }) {
 
     {payState && !dialog && <div className={payState.status === 'pending' ? 'c-paypop' : 'c-paypop ok'} role="status" aria-live="polite">
       {payState.status === 'pending'
-        ? <><span className="c-paypop-dot" aria-hidden="true" /><div><b>Payment confirmation pending</b><small>{payState.ref} · {r.name} will start cooking once it confirms your UPI payment.</small></div></>
+        ? <><span className="c-paypop-dot" aria-hidden="true" /><div><b>{payState.claimed ? 'Payment sent. Waiting for verification' : payState.reason ? 'Payment not verified' : 'Payment confirmation pending'}</b><small>{payState.ref} · {payState.claimed ? `${r.name} is checking your payment and will start cooking once it is verified.` : payState.reason ? `${payState.reason}. Pay again or send the correct transaction ID.` : `Pay, then tap "I've paid". ${r.name} starts cooking once it confirms your UPI payment.`}</small></div></>
         : <><span className="c-paypop-tick" aria-hidden="true">✓</span><div><b>Payment confirmed</b><small>{payState.ref} · The kitchen is getting started.</small></div></>}
     </div>}
 
-    {dialog && placed && <OrderDialog payStatus={payState && payState.status} r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
+    {dialog && placed && <OrderDialog payStatus={payState && payState.status} payClaimed={Boolean(payState && payState.claimed)} payReason={payState ? payState.reason : ''} onClaimed={onClaimed} r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
   </div>
 }
 
@@ -401,7 +404,29 @@ const upiLink = (r, order) => {
   // A personal UPI ID cannot take a pre-filled amount in most apps ("request type not supported"), so leave it out.
   return r.upi_personal ? `upi://pay?pa=${r.upi_id}&pn=${name}&cu=INR` : `upi://pay?pa=${r.upi_id}&pn=${name}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${note}`
 }
-function UpiPay({ r, order, show }) {
+/* "I've paid": the customer can add the UPI transaction ID (optional) and wait while the kitchen verifies the payment. */
+function PayClaim({ orderRef, claimed, reason, onDone }) {
+  const [txn, setTxn] = useState(''), [busy, setBusy] = useState(false), [err, setErr] = useState('')
+  const send = async (e) => {
+    e.preventDefault()
+    if (busy || !supabase) return
+    setBusy(true); setErr('')
+    const { error } = await supabase.rpc('claim_payment', { p_order_number: orderRef, p_txn: txn.trim() || null })
+    setBusy(false)
+    if (error) return setErr((error.message || '').replace(/^PAYMENT:\s*/, '') || 'Could not send. Please try again.')
+    setTxn(''); onDone && onDone()
+  }
+  if (claimed) return <p className="c-claimed" role="status"><b>Payment sent. Waiting for verification.</b> The kitchen has been told and will confirm it shortly.</p>
+  return <form className="c-claim" onSubmit={send}>
+    {reason && <p className="c-claim-bad" role="alert"><b>Payment not verified:</b> {reason}. Pay again or send the correct transaction ID.</p>}
+    <label className="c-claim-field"><span>UPI transaction ID <small>optional</small></span>
+      <input className="c-input" aria-label="UPI transaction ID" value={txn} onChange={e => setTxn(e.target.value)} placeholder="e.g. 412345678901" autoCapitalize="characters" autoCorrect="off" spellCheck="false" maxLength={40} /></label>
+    {err && <p className="c-note c-note-bad" role="alert">{err}</p>}
+    <button className="c-cta c-cta-accent c-claim-btn" disabled={busy}>{busy ? 'Sending…' : "I've paid"}</button>
+    <small className="c-claim-note">Tap this after you pay. The transaction ID helps the kitchen find your payment faster.</small>
+  </form>
+}
+function UpiPay({ r, order, show, claimed, reason, onClaimed }) {
   const [copied, setCopied] = useState(false), [copiedAmt, setCopiedAmt] = useState(false)
   if (!show || !r.upi_id || !UPI_RE.test(r.upi_id) || order.payment !== 'UPI') return null
   const link = upiLink(r, order)   // only used inside the QR code
@@ -411,11 +436,12 @@ function UpiPay({ r, order, show }) {
     <div className="c-upi-amount"><span>Amount to pay</span><b>{money(order.total)}</b><button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(String(Number(order.total).toFixed(2))); setCopiedAmt(true); setTimeout(() => setCopiedAmt(false), 2000) }}>{copiedAmt ? 'Copied' : 'Copy amount'}</button></div>
     <p className="c-upi-id">UPI ID <code>{r.upi_id}</code> <button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(r.upi_id); setCopied(true); setTimeout(() => setCopied(false), 2000) }}>{copied ? 'Copied' : 'Copy'}</button></p>
     <small className="c-upi-note">You can also copy the UPI ID and amount and pay in your UPI app. Write <b>{order.ref}</b> in the note. After you pay, {r.name} confirms your payment and then starts cooking.</small>
+    <PayClaim orderRef={order.ref} claimed={claimed} reason={reason} onDone={onClaimed} />
   </div>
 }
 
 /* The centred "order received" confirmation, in the restaurant's own colours */
-function OrderDialog({ r, order, copied, onCopy, onClose, payStatus }) {
+function OrderDialog({ r, order, copied, onCopy, onClose, payStatus, payClaimed, payReason, onClaimed }) {
   const done = useRef(null)
   useEffect(() => {
     done.current && done.current.focus()
@@ -429,7 +455,7 @@ function OrderDialog({ r, order, copied, onCopy, onClose, payStatus }) {
       <p className="c-dlg-rest">{r.name}</p>
       <svg className="c-check" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="22" cy="22" r="16" /><path d="M14.5 22.5l5 5 10-11" /></svg>
       <h2 id="od-title" className="c-dlg-title">Order received!</h2>
-      {order.payment === 'UPI' && payStatus === 'pending' && <p className="c-dlg-paywait" role="status">Payment confirmation pending</p>}
+      {order.payment === 'UPI' && payStatus === 'pending' && <p className="c-dlg-paywait" role="status">{payClaimed ? 'Payment sent. Waiting for verification' : payReason ? 'Payment not verified' : 'Payment confirmation pending'}</p>}
       {order.payment === 'UPI' && payStatus === 'received' && <p className="c-dlg-paywait ok" role="status">Payment confirmed ✓</p>}
       <p className="c-dlg-line">Your reference is</p>
       <div className="c-dlg-ref"><code>{order.ref}</code><button type="button" className="c-btn c-btn-ink" onClick={onCopy}>{copied ? 'Copied' : 'Copy'}</button></div>
@@ -437,7 +463,7 @@ function OrderDialog({ r, order, copied, onCopy, onClose, payStatus }) {
       {order.discount > 0 && <p className="c-dlg-deliver">Code {order.coupon}: you saved {money(order.discount)}</p>}
       {order.deliveryDate && <p className="c-dlg-deliver">Delivery: {deliveryText(order.deliveryDate, order.today)}</p>}
       {order.items.length > 0 && <ul className="c-dlg-items" aria-label="Your order">{order.items.map((i, k) => <li key={k}><span>{i.quantity} × {i.name}</span><span>{money(i.price * i.quantity)}</span></li>)}</ul>}
-      <UpiPay r={r} order={order} show={payStatus === 'pending'} />
+      <UpiPay r={r} order={order} show={payStatus === 'pending'} claimed={payClaimed} reason={payReason} onClaimed={onClaimed} />
       <WhatsAppLink r={r} className="c-wa c-wa-dlg" />
       <p className="c-dlg-hint">Keep this number to track your order.</p>
       <button ref={done} type="button" className="c-cta c-cta-hero" onClick={onClose}>Done</button>

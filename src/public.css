@@ -414,3 +414,12 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-upi-amount .c-btn{min-height:36px;padding:0 12px}
 .c-app .c-success .c-upi-amount{background:color-mix(in srgb,var(--c-accent-solid) 20%,transparent)}
 .c-app .c-upi-title{font-size:17px;font-weight:700;text-align:center}
+
+/* I've paid + transaction ID */
+.c-app .c-claim{display:grid;gap:10px;margin-top:6px;padding:14px;border-radius:18px;background:color-mix(in srgb,var(--c-hero-ink) 10%,transparent);color:inherit;text-align:left}
+.c-app .c-claim-field>span{display:block;font-size:14px;font-weight:650;margin-bottom:6px}
+.c-app .c-claim-field small,.c-app .c-claim-note{font-weight:400;opacity:.8;font-size:12.5px;line-height:1.4}
+.c-app .c-claim-btn{min-height:52px}
+.c-app .c-claim-bad{padding:10px 12px;border-radius:12px;background:rgba(184,50,33,.16);font-size:14px;line-height:1.4}
+.c-app .c-claimed{margin:6px 0 0;padding:12px 14px;border-radius:16px;background:color-mix(in srgb,var(--c-green) 22%,transparent);font-size:14px;line-height:1.45;text-align:left}
+.c-app .c-success .c-claim,.c-app .c-track .c-claim{background:color-mix(in srgb,var(--c-accent-solid) 14%,transparent)}

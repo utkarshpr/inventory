@@ -141,6 +141,10 @@ alter table public.orders add column if not exists cancel_reason text;
 alter table public.orders add column if not exists coupon_code text;
 alter table public.orders add column if not exists payment_status text not null default 'not_required' check (payment_status in ('not_required', 'pending', 'received'));   -- UPI orders wait for staff to confirm the payment
 alter table public.orders add column if not exists payment_confirmed_at timestamptz;
+alter table public.orders add column if not exists payment_txn_id text;            -- the UPI transaction ID the customer sent (optional)
+alter table public.orders add column if not exists payment_claimed_at timestamptz; -- customer pressed "I've paid": waiting for staff to verify
+alter table public.orders add column if not exists payment_claims int not null default 0;
+alter table public.orders add column if not exists payment_reject_reason text;     -- why staff did not accept the payment
 alter table public.orders add column if not exists discount numeric not null default 0;
 alter table public.recipes add column if not exists sold_out_date date;   -- sold out for that day only; clears itself the next day
 alter table public.recipes add column if not exists image_url text;
@@ -521,7 +525,7 @@ returns jsonb
 language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
     'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
+    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
   from public.orders o join public.restaurants r on r.id = o.restaurant_id
   where o.order_number = upper(trim(p_order_number))
   limit 1;
@@ -536,7 +540,7 @@ begin
   select count(*) into v_total from public.orders where customer_phone = v_phone;
   select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
     select jsonb_build_object('order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
+      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
     from public.orders o join public.restaurants r on r.id = o.restaurant_id
     where o.customer_phone = v_phone order by o.created_at desc limit v_lim offset v_off) s;
   return jsonb_build_object('total', v_total, 'limit', v_lim, 'offset', v_off, 'orders', v_rows);
@@ -847,3 +851,46 @@ end $$;
 drop trigger if exists orders_gate_payment on public.orders;
 create trigger orders_gate_payment before update on public.orders
   for each row execute function public.gate_payment();
+
+-- The customer says "I've paid" (optionally with the UPI transaction ID). Staff then verify and accept or reject.
+create or replace function public.claim_payment(p_order_number text, p_txn text default null)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare o record; t text := nullif(trim(coalesce(p_txn, '')), '');
+begin
+  select * into o from public.orders where order_number = upper(trim(coalesce(p_order_number, '')));
+  if not found then raise exception 'PAYMENT: We could not find that order'; end if;
+  if o.payment_method is distinct from 'UPI' or o.payment_status <> 'pending' or o.status = 'Cancelled' then
+    raise exception 'PAYMENT: This order is not waiting for a UPI payment';
+  end if;
+  if t is not null and t !~ '^[A-Za-z0-9]{6,40}$' then
+    raise exception 'PAYMENT: The transaction ID should be 6 to 40 letters or numbers, with no spaces';
+  end if;
+  if o.payment_claims >= 5 then raise exception 'PAYMENT: Too many tries. Please call the kitchen.'; end if;
+  update public.orders
+     set payment_txn_id = coalesce(t, payment_txn_id), payment_claimed_at = now(),
+         payment_claims = payment_claims + 1, payment_reject_reason = null
+   where id = o.id;
+  return jsonb_build_object('claimed', true);
+end $$;
+revoke all on function public.claim_payment(text, text) from public;
+grant execute on function public.claim_payment(text, text) to anon, authenticated;
+
+-- Tell staff (push + ntfy) when a payment is waiting to be verified.
+create or replace function public.alert_payment_claim()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+declare rname text;
+begin
+  if new.payment_claimed_at is not null and new.payment_claimed_at is distinct from old.payment_claimed_at then
+    select name into rname from public.restaurants where id = new.restaurant_id;
+    perform public.send_alert(new.restaurant_id, 'Verify payment · ' || coalesce(rname, 'Kitchen'),
+      new.order_number || ' · ₹' || trim_scale(new.total)::text || case when new.payment_txn_id is not null then ' · txn ' || new.payment_txn_id else '' end,
+      'pay-' || new.order_number);
+  end if;
+  return new;
+end $$;
+revoke all on function public.alert_payment_claim() from public, anon, authenticated;
+drop trigger if exists orders_alert_payment_claim on public.orders;
+create trigger orders_alert_payment_claim after update of payment_claimed_at on public.orders
+  for each row execute function public.alert_payment_claim();

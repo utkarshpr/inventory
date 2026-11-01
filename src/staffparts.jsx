@@ -36,12 +36,24 @@ export function OpenToggle({ r, onToggle }) {
 }
 
 /* New customer orders for the restaurant you are managing (never the other one), in that restaurant's colours */
-export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear }) {
+export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear, onAccept, onReject }) {
   if (!alerts.length) return null
   return <div className="oa-stack" role="region" aria-label="New orders" aria-live="assertive">
     {alerts.slice(0, 3).map(a => {
       const r = restaurants.find(x => x.id === a.restaurantId)
       const o = a.order
+      if (a.kind === 'verify') return <article key={a.key} className="oa-card oa-verify" style={themeStyle(r && r.slug)}>
+        <header className="oa-head">
+          {r ? <Mark r={r} size={30} /> : <span />}
+          <span className="oa-new">Verify payment{r ? ` · ${r.name}` : ''}</span>
+          <button type="button" className="oa-x" aria-label="Dismiss" onClick={() => onDismiss(a.key)}>×</button>
+        </header>
+        <div className="oa-ref"><b>{o.id}</b><span>₹{o.total}</span></div>
+        <p className="oa-cust">{o.customer}</p>
+        <p className="oa-txn">{o.paymentTxn ? <>Transaction ID <code>{o.paymentTxn}</code></> : 'No transaction ID sent'}</p>
+        <p className="oa-pay">Check your UPI app for ₹{o.total}, then accept or reject.</p>
+        <div className="oa-foot oa-verify-actions"><button type="button" className="oa-reject" onClick={() => onReject(a)}>Reject</button><button type="button" className="oa-view" onClick={() => onAccept(a)}>Accept payment</button></div>
+      </article>
       return <article key={a.key} className="oa-card" style={themeStyle(r && r.slug)}>
         <header className="oa-head">
           {r ? <Mark r={r} size={30} /> : <span />}
@@ -195,10 +207,10 @@ export function OrderLimitsSettings({ limits, onSave }) {
 
 /* System notification for a new order. Only shown when the app is in the background, because the
    in-app popup and sound already cover the case where it is open. */
-export function systemNotify(order, restaurantName) {
+export function systemNotify(order, restaurantName, kind = 'New order') {
   try {
     if (typeof Notification === 'undefined' || Notification.permission !== 'granted' || !document.hidden) return
-    const title = `New order · ${restaurantName}`
+    const title = `${kind} · ${restaurantName}`
     const opts = { body: `${order.id} · ₹${order.total} · ${order.customer}`, tag: order.id, renotify: true, requireInteraction: true, vibrate: [200, 100, 200], icon: '/icons/icon-192.png', badge: '/icons/icon-192.png', data: { url: '/' } }
     if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistration().then(reg => reg ? reg.showNotification(title, opts) : new Notification(title, opts)).catch(() => {})
     else new Notification(title, opts)
