@@ -394,7 +394,7 @@ begin
   if length(p_name) > 80 or length(p_phone) > 20 or length(p_address) > 300 or length(coalesce(p_notes, '')) > 300 then
     raise exception 'Some details are too long';
   end if;
-  if p_payment not in ('Cash on delivery', 'UPI', 'Card on delivery', 'Bank transfer') then
+  if p_payment not in ('Cash on delivery', 'UPI') then
     raise exception 'Invalid payment method';
   end if;
 

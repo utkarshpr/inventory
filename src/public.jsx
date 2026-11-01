@@ -4,7 +4,7 @@ import { qrMatrix } from './qr'
 import { useRestaurants, themeStyle, logoFor, Mark, wordmarkLines, closedText, dayParts, deliveryText, scheduleLabel, usePageBrand, zonedNow } from './restaurants'
 import './public.css'
 
-const PAYMENTS = ['Cash on delivery', 'UPI', 'Card on delivery', 'Bank transfer']
+const PAYMENTS = ['Cash on delivery', 'UPI']
 const STEPS = [['New', 'Received'], ['Cooking', 'Cooking'], ['Ready', 'Ready'], ['Delivered', 'Delivered']]
 
 const icons = {
@@ -356,7 +356,7 @@ function OrderPage({ r, list }) {
             <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="House or flat, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
             <fieldset className="c-field c-pay"><legend>Payment</legend>
               <div className="c-chips">{PAYMENTS.map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
-              {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">After you place the order you'll get a Pay with UPI button and a QR code.</p>}
+              {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">After you place the order you'll see a QR code and the UPI ID to pay.</p>}
             </fieldset>
             <div className="c-field c-coupon"><span>Coupon code <small>optional</small></span>
               <div className="c-coupon-row"><input className="c-input" aria-label="Coupon code" value={couponText} onChange={e => { setCouponText(e.target.value.toUpperCase()); if (coupon) { setCoupon(null); setCouponMsg('') } }} autoCapitalize="characters" autoCorrect="off" spellCheck="false" maxLength={20} placeholder="e.g. WELCOME50" />
@@ -404,14 +404,13 @@ const upiLink = (r, order) => {
 function UpiPay({ r, order, show }) {
   const [copied, setCopied] = useState(false), [copiedAmt, setCopiedAmt] = useState(false)
   if (!show || !r.upi_id || !UPI_RE.test(r.upi_id) || order.payment !== 'UPI') return null
-  const link = upiLink(r, order)
+  const link = upiLink(r, order)   // only used inside the QR code
   return <div className="c-upi">
-    <a className="c-cta c-cta-accent c-upi-btn" href={link}>Pay {money(order.total)} with UPI</a>
-    <figure className="c-upi-qr"><QrCode text={link} label={`UPI QR code to pay ${money(order.total)} to ${r.name}`} /><figcaption>Or scan this with any UPI app</figcaption></figure>
-    <p className="c-upi-id">UPI ID <code>{r.upi_id}</code> <button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(r.upi_id); setCopied(true); setTimeout(() => setCopied(false), 2000) }}>{copied ? 'Copied' : 'Copy'}</button></p>
+    <p className="c-upi-title">Pay by UPI</p>
+    <figure className="c-upi-qr"><QrCode text={link} label={`UPI QR code to pay ${r.name}`} /><figcaption>{r.upi_personal ? 'Scan with any UPI app, then enter the amount below' : 'Scan with any UPI app. The amount is filled in'}</figcaption></figure>
     <div className="c-upi-amount"><span>Amount to pay</span><b>{money(order.total)}</b><button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(String(Number(order.total).toFixed(2))); setCopiedAmt(true); setTimeout(() => setCopiedAmt(false), 2000) }}>{copiedAmt ? 'Copied' : 'Copy amount'}</button></div>
-    <small className="c-upi-note">{r.upi_personal ? <>Your UPI app will ask for the amount. Pay exactly {money(order.total)} and write <b>{order.ref}</b> in the note. </> : <>Opens your UPI app. Use the order number {order.ref} as the note. </>}After you pay, {r.name} confirms your payment and then starts cooking.</small>
-    <small className="c-upi-note">If your UPI app says the request is not supported, copy the UPI ID and amount above and pay to the ID manually.</small>
+    <p className="c-upi-id">UPI ID <code>{r.upi_id}</code> <button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(r.upi_id); setCopied(true); setTimeout(() => setCopied(false), 2000) }}>{copied ? 'Copied' : 'Copy'}</button></p>
+    <small className="c-upi-note">You can also copy the UPI ID and amount and pay in your UPI app. Write <b>{order.ref}</b> in the note. After you pay, {r.name} confirms your payment and then starts cooking.</small>
   </div>
 }
 

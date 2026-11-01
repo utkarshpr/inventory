@@ -68,7 +68,7 @@ Leave the dashboard open. The strip shows **Live**, **Sound on**, **Screen stays
 - After running the schema with pg_cron on, at 10:30 pm IST confirm the daily summary arrives.
 
 ## 10. UPI payment confirmation
-- Place a UPI order from a phone. It should show "Payment confirmation pending" with the Pay button and QR code.
+- Place a UPI order from a phone. It should show "Payment confirmation pending" with the QR code, the UPI ID (Copy) and the amount (Copy amount).
 - On the dashboard the new-order popup says to confirm the payment. In Orders the order shows "UPI · payment pending". Try to set it to Cooking: it asks if you received the payment.
-- Tap Confirm payment. On the customer's phone the popup should change to "Payment confirmed" and then disappear, and the Pay button and QR code go away.
-- Scan the QR code and press the Pay button with a real UPI app (use a small amount) and confirm the app opens with the right amount.
+- Tap Confirm payment. On the customer's phone the popup should change to "Payment confirmed" and then disappear, and the QR code and UPI ID go away.
+- Pay a small amount by scanning the QR code from another phone (or screenshot it and scan from the gallery), and by copying the UPI ID. Confirm the payment arrives and that you can match it with the order number.

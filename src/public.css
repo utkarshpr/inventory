@@ -413,3 +413,4 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-upi-amount b{font-size:22px;margin-right:auto;margin-left:4px}
 .c-app .c-upi-amount .c-btn{min-height:36px;padding:0 12px}
 .c-app .c-success .c-upi-amount{background:color-mix(in srgb,var(--c-accent-solid) 20%,transparent)}
+.c-app .c-upi-title{font-size:17px;font-weight:700;text-align:center}

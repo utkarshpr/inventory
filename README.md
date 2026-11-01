@@ -118,7 +118,7 @@ The ntfy topic in Settings keeps working as a separate backup.
 - **Sold out today**: on a dish in Recipes, switch "Sold out today". Customers see "Sold out today" and can't add it. It clears itself the next day.
 - **Dish photos**: add a photo to a dish in Recipes. It is resized on the phone and stored in the free `dish-photos` storage bucket (created by `schema.sql`).
 - **Coupon codes** (Settings → Coupon codes): percent or rupees off, optional cap, minimum order, expiry date and use limit, for both restaurants or one. The server works out the discount.
-- **UPI pay button**: each restaurant sets its own UPI ID in its Settings. Customers who choose UPI get a "Pay with UPI" button and a QR code, both with the amount filled in. The QR code is made by `src/qr.js`, so no extra package is needed. No gateway, no fees; you confirm payments yourself.
+- **UPI pay button**: each restaurant sets its own UPI ID in its Settings. Customers who choose UPI see a QR code, the UPI ID with a Copy button, and the amount to pay with a Copy amount button. (There is no Pay button: UPI apps reject a pre-filled request to a personal UPI ID.) The QR code is made by `src/qr.js`, so no extra package is needed. No gateway, no fees; you confirm payments yourself.
 - **WhatsApp button** on each order: opens WhatsApp to the customer with a ready message for the order's status. You press send.
 - **Order again** on the tracking page: refills the cart from a past order at today's prices.
 - **Low-stock alerts**: a notification when an ingredient falls to its reorder level. Turn on or off per restaurant in Settings.
@@ -132,4 +132,5 @@ The ntfy topic in Settings keeps working as a separate backup.
 - Staff see "UPI · payment pending" and a **Confirm payment** button on the order. Choosing Cooking first asks "Did you receive the UPI payment?" Confirming saves the time and then moves the order on.
 - The customer sees a popup "Payment confirmation pending" (and the first step of their order status says the same). It changes to "Payment confirmed" when staff confirm, then disappears and the normal order screen remains. The Pay button and QR code go away once paid.
 - Unconfirmed UPI orders are left out of To cook, sales totals, the sales goal and the daily summary until confirmed.
-- The UPI link uses only `pa`, `pn`, `am`, `cu` and `tn`, with the plain `@` in the UPI ID and no symbols in the name. A business (merchant) UPI ID works most reliably; some apps refuse a pre-filled amount for a personal ID.
+- The QR holds only `pa`, `pn`, `am`, `cu` and `tn` (the amount and note are left out when "Personal UPI ID" is ticked in Settings). A business (merchant) UPI ID works most reliably.
+- Payment choices for customers are **Cash on delivery** and **UPI** only (card on delivery and bank transfer were removed; the database refuses them too).
