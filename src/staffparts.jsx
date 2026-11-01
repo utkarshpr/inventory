@@ -64,7 +64,7 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear })
 /* This restaurant's own delivery days and WhatsApp group. Changes only affect the selected restaurant. */
 export function RestaurantSettings({ r, secrets, onSave }) {
   const todayIso = zonedNow(r.timezone || 'Asia/Kolkata').date
-  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', upi: r.upi_id || '', lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
+  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', upi: r.upi_id || '', upiPersonal: Boolean(r.upi_personal), lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
   const [f, setF] = useState(init)
   useEffect(() => { setF(init()) }, [r.id, secrets && secrets.alert_topic])
   const set = (patch) => setF(cur => ({ ...cur, ...patch }))
@@ -89,7 +89,7 @@ export function RestaurantSettings({ r, secrets, onSave }) {
   const submit = (e) => {
     e.preventDefault()
     if (customEmpty || !waOk || !topicOk || !minOk || !upiOk) return
-    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, upi_id: f.upi.trim() || null, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
+    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, upi_id: f.upi.trim() || null, upi_personal: f.upiPersonal, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
   }
   return <form className="panel rset" onSubmit={submit}>
     <div className="panel-heading"><div><h3>Delivery days · {r.name}</h3><p>Customers can only pick these days when ordering. This changes {r.name} only.</p></div></div>
@@ -126,6 +126,7 @@ export function RestaurantSettings({ r, secrets, onSave }) {
       <label className="rset-field">UPI ID for {r.name}
         <input value={f.upi} onChange={e => set({ upi: e.target.value })} placeholder="e.g. saltsaffron@okaxis" autoCapitalize="none" autoCorrect="off" spellCheck="false" aria-label="UPI ID" aria-invalid={!upiOk} />
         <small>Customers who choose UPI get a "Pay with UPI" button for this ID. Leave empty to hide it. Each restaurant has its own.</small></label>
+      <label className="rset-check rset-lowstock"><input type="checkbox" aria-label="Personal UPI ID" checked={f.upiPersonal} onChange={e => set({ upiPersonal: e.target.checked })} />This is a personal UPI ID, not a business one <small>UPI apps often show "request type not supported" when a personal ID gets a pre-filled amount. Tick this and the Pay button and QR leave the amount out. The customer types it, and we show them exactly how much. A business (merchant) UPI ID fills the amount in on its own.</small></label>
       {!upiOk && <p className="rset-warn" role="alert">That doesn't look like a UPI ID. It looks like name@bank.</p>}
       {!minOk && <p className="rset-warn" role="alert">The minimum order can't be negative.</p>}
 

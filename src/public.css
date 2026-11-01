@@ -407,3 +407,9 @@ html{-webkit-text-size-adjust:100%}
   @keyframes c-paydot{0%,100%{transform:scale(.8);opacity:.6}50%{transform:scale(1.15);opacity:1}}
   .c-app .c-paypop{animation:c-rise-in .3s ease-out both}
 }
+
+.c-app .c-upi-amount{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--c-hero-ink) 14%,transparent);color:inherit}
+.c-app .c-upi-amount span{font-size:13px;opacity:.85}
+.c-app .c-upi-amount b{font-size:22px;margin-right:auto;margin-left:4px}
+.c-app .c-upi-amount .c-btn{min-height:36px;padding:0 12px}
+.c-app .c-success .c-upi-amount{background:color-mix(in srgb,var(--c-accent-solid) 20%,transparent)}

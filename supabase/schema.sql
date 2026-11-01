@@ -145,6 +145,7 @@ alter table public.orders add column if not exists discount numeric not null def
 alter table public.recipes add column if not exists sold_out_date date;   -- sold out for that day only; clears itself the next day
 alter table public.recipes add column if not exists image_url text;
 alter table public.restaurants add column if not exists upi_id text;
+alter table public.restaurants add column if not exists upi_personal boolean not null default false;   -- personal UPI IDs: UPI apps refuse a pre-filled amount, so the link leaves it out
 alter table public.restaurants add column if not exists low_stock_alerts boolean not null default true;   -- Settings: alert when an ingredient runs low
 update public.orders set delivery_date = (created_at at time zone 'Asia/Kolkata')::date where delivery_date is null;   -- older orders: delivered on the day they were placed
 alter table public.orders alter column delivery_date set default ((now() at time zone 'Asia/Kolkata')::date);

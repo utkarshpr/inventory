@@ -395,19 +395,23 @@ const UPI_RE = /^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/
 /* The simplest link the UPI apps all accept: only pa, pn, am, cu and tn. The "@" in the UPI ID is left as it is,
    and the name has no "&" or other symbols. Extra fields (such as a transaction ref) make some apps say "request type not supported". */
 const upiLink = (r, order) => {
-  const name = String(r.name || 'Kitchen').replace(/&/g, 'and').replace(/[^A-Za-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().replace(/ /g, '%20')
+  // Some UPI apps show the name exactly as sent (they do not decode "%20"), so the name has no spaces or symbols.
+  const name = String(r.name || 'Kitchen').replace(/&/g, 'and').replace(/[^A-Za-z0-9]/g, '')
   const note = String(order.ref || '').replace(/[^A-Za-z0-9-]/g, '')
-  return `upi://pay?pa=${r.upi_id}&pn=${name}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${note}`
+  // A personal UPI ID cannot take a pre-filled amount in most apps ("request type not supported"), so leave it out.
+  return r.upi_personal ? `upi://pay?pa=${r.upi_id}&pn=${name}&cu=INR` : `upi://pay?pa=${r.upi_id}&pn=${name}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${note}`
 }
 function UpiPay({ r, order, show }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false), [copiedAmt, setCopiedAmt] = useState(false)
   if (!show || !r.upi_id || !UPI_RE.test(r.upi_id) || order.payment !== 'UPI') return null
   const link = upiLink(r, order)
   return <div className="c-upi">
     <a className="c-cta c-cta-accent c-upi-btn" href={link}>Pay {money(order.total)} with UPI</a>
     <figure className="c-upi-qr"><QrCode text={link} label={`UPI QR code to pay ${money(order.total)} to ${r.name}`} /><figcaption>Or scan this with any UPI app</figcaption></figure>
     <p className="c-upi-id">UPI ID <code>{r.upi_id}</code> <button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(r.upi_id); setCopied(true); setTimeout(() => setCopied(false), 2000) }}>{copied ? 'Copied' : 'Copy'}</button></p>
-    <small className="c-upi-note">Opens your UPI app. Use the order number {order.ref} as the note. After you pay, {r.name} confirms your payment and then starts cooking.</small>
+    <div className="c-upi-amount"><span>Amount to pay</span><b>{money(order.total)}</b><button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(String(Number(order.total).toFixed(2))); setCopiedAmt(true); setTimeout(() => setCopiedAmt(false), 2000) }}>{copiedAmt ? 'Copied' : 'Copy amount'}</button></div>
+    <small className="c-upi-note">{r.upi_personal ? <>Your UPI app will ask for the amount. Pay exactly {money(order.total)} and write <b>{order.ref}</b> in the note. </> : <>Opens your UPI app. Use the order number {order.ref} as the note. </>}After you pay, {r.name} confirms your payment and then starts cooking.</small>
+    <small className="c-upi-note">If your UPI app says the request is not supported, copy the UPI ID and amount above and pay to the ID manually.</small>
   </div>
 }
 
