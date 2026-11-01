@@ -404,7 +404,7 @@ function App() {
     if (!supabase) return notify('Photos need Supabase')
     try {
       const blob = await shrinkImage(file), path = `${active.id}/${recipe.id}-${Date.now()}.jpg`
-      const { error } = await supabase.storage.from('dish-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: true })
+      const { error } = await supabase.storage.from('dish-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false })
       if (error) return notify(`Could not upload: ${error.message}`)
       const url = supabase.storage.from('dish-photos').getPublicUrl(path).data.publicUrl
       const { error: e2 } = await supabase.from('recipes').update({ image_url: url }).eq('id', recipe.id)

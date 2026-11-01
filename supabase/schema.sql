@@ -880,6 +880,8 @@ end $$;
 do $$ begin
   if exists (select 1 from information_schema.schemata where schema_name = 'storage') then
     insert into storage.buckets (id, name, public) values ('dish-photos', 'dish-photos', true) on conflict (id) do nothing;
+    execute 'drop policy if exists "Staff can see dish photos" on storage.objects';
+    execute 'create policy "Staff can see dish photos" on storage.objects for select to authenticated using (bucket_id = ''dish-photos'')';
     execute 'drop policy if exists "Staff can add dish photos" on storage.objects';
     execute 'create policy "Staff can add dish photos" on storage.objects for insert to authenticated with check (bucket_id = ''dish-photos'')';
     execute 'drop policy if exists "Staff can change dish photos" on storage.objects';
