@@ -126,3 +126,10 @@ The ntfy topic in Settings keeps working as a separate backup.
 - **Reports**: busiest hours, busiest days of the week and slow sellers.
 - **Backup** (Settings): download orders, menu and stock as spreadsheets, or everything as one file.
 - The greeting on the dashboard follows the time of day and shows the owner of the restaurant you are managing.
+
+## UPI payment confirmation
+- An order paid by UPI starts as **Payment confirmation pending** and cannot be moved to Cooking, Ready or Delivered until staff confirm the payment (the database enforces this). Cancelling is always allowed.
+- Staff see "UPI · payment pending" and a **Confirm payment** button on the order. Choosing Cooking first asks "Did you receive the UPI payment?" Confirming saves the time and then moves the order on.
+- The customer sees a popup "Payment confirmation pending" (and the first step of their order status says the same). It changes to "Payment confirmed" when staff confirm, then disappears and the normal order screen remains. The Pay button and QR code go away once paid.
+- Unconfirmed UPI orders are left out of To cook, sales totals, the sales goal and the daily summary until confirmed.
+- The UPI link uses only `pa`, `pn`, `am`, `cu` and `tn`, with the plain `@` in the UPI ID and no symbols in the name. A business (merchant) UPI ID works most reliably; some apps refuse a pre-filled amount for a personal ID.

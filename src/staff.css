@@ -397,3 +397,14 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .pay-warn{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
 .prep-wait{margin:6px 0 12px;padding:10px 12px;border-radius:12px;background:rgba(224,160,40,.16);font-size:14px;line-height:1.4}
 .oa-pay{margin:6px 0 0;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.2);font-size:13px;font-weight:700}
+
+/* order row on phones: status and the action buttons wrap instead of pushing the page wider */
+@media (max-width:760px){
+  .app-shell .order-row{min-width:0}
+  .app-shell .order-row>*{min-width:0}
+  .app-shell .order-row .row-actions{grid-area:actions;display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+  .app-shell .order-row .status-select{max-width:100%}
+  .app-shell .order-table,.app-shell .orders-panel{min-width:0;max-width:100%}
+  .app-shell .order-row:has(.pay-confirm){grid-template-areas:"person total" "items items" "status status" "actions actions"}
+  .app-shell .order-row:has(.pay-confirm) .row-actions{justify-content:flex-start}
+}

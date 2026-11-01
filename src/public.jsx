@@ -392,10 +392,17 @@ function QrCode({ text, label }) {
   return <svg className="c-qr" viewBox={`0 0 ${n + q * 2} ${n + q * 2}`} role="img" aria-label={label} shapeRendering="crispEdges"><rect width="100%" height="100%" fill="#fff" /><path d={d.join('')} fill="#111" /></svg>
 }
 const UPI_RE = /^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/
+/* The simplest link the UPI apps all accept: only pa, pn, am, cu and tn. The "@" in the UPI ID is left as it is,
+   and the name has no "&" or other symbols. Extra fields (such as a transaction ref) make some apps say "request type not supported". */
+const upiLink = (r, order) => {
+  const name = String(r.name || 'Kitchen').replace(/&/g, 'and').replace(/[^A-Za-z0-9 ]/g, '').replace(/\s+/g, ' ').trim().replace(/ /g, '%20')
+  const note = String(order.ref || '').replace(/[^A-Za-z0-9-]/g, '')
+  return `upi://pay?pa=${r.upi_id}&pn=${name}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${note}`
+}
 function UpiPay({ r, order, show }) {
   const [copied, setCopied] = useState(false)
   if (!show || !r.upi_id || !UPI_RE.test(r.upi_id) || order.payment !== 'UPI') return null
-  const link = `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent(r.name)}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${encodeURIComponent('Order ' + order.ref)}`
+  const link = upiLink(r, order)
   return <div className="c-upi">
     <a className="c-cta c-cta-accent c-upi-btn" href={link}>Pay {money(order.total)} with UPI</a>
     <figure className="c-upi-qr"><QrCode text={link} label={`UPI QR code to pay ${money(order.total)} to ${r.name}`} /><figcaption>Or scan this with any UPI app</figcaption></figure>
