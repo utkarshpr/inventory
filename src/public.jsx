@@ -246,8 +246,9 @@ function OrderPage({ r, list }) {
   const lineInfo = (key) => {
     const [id, optStr] = key.split('|'), d = dishes.find(x => x.id === id)
     if (!d) return null
-    const ids = optStr ? optStr.split('+') : [], half = ids.includes('half') && hasHalf(d), chosen = optsOf(d).filter(o => ids.includes(o.id))
-    const names = [...(half ? ['Half plate'] : hasHalf(d) ? ['Full plate'] : []), ...chosen.map(o => o.name)]
+    const ids = optStr ? optStr.split('+') : [], half = ids.includes('half') && hasHalf(d), chosen = ids.map(i => optsOf(d).find(o => o.id === i)).filter(Boolean)
+    const cnt = {}; chosen.forEach(o => { cnt[o.name] = (cnt[o.name] || 0) + 1 })
+    const names = [...(half ? ['Half plate'] : hasHalf(d) ? ['Full plate'] : []), ...Object.keys(cnt).map(n => cnt[n] > 1 ? `${n} ×${cnt[n]}` : n)]
     return { key, dish: d, half, optionIds: chosen.map(o => o.id), label: names.join(', '), unit: (half ? halfPrice(d) : Number(d.selling_price)) + chosen.reduce((s, o) => s + Number(o.price_delta), 0), qty: qty[key] }
   }
   const picked = Object.keys(qty).filter(k => qty[k] > 0).map(lineInfo).filter(Boolean)
@@ -485,7 +486,8 @@ const upiLink = (r, order) => {
 function OptionSheet({ dish, options, halfPrice, onClose, onAdd }) {
   const realSizes = options.filter(o => o.kind === 'size'), extras = options.filter(o => o.kind === 'extra')
   const sizes = realSizes.length ? realSizes : halfPrice != null ? [{ id: 'full', name: 'Full plate', price_delta: 0, shown: Number(dish.selling_price) }, { id: 'half', name: 'Half plate', price_delta: 0, shown: halfPrice }] : []
-  const [size, setSize] = useState(sizes[0] ? sizes[0].id : ''), [picked, setPicked] = useState([])
+  const [size, setSize] = useState(sizes[0] ? sizes[0].id : ''), [picked, setPicked] = useState([])   // ids of picked extras; the same id twice means two of it
+  const countOf = (id) => picked.filter(x => x === id).length, bump = (id, d) => setPicked(p => d > 0 ? (p.length >= 8 ? p : [...p, id]) : (p.includes(id) ? (() => { const i = p.lastIndexOf(id); return [...p.slice(0, i), ...p.slice(i + 1)] })() : p))
   const base = size === 'half' ? halfPrice : Number(dish.selling_price)
   const unit = base + [...(realSizes.length && size ? [size] : []), ...picked].reduce((s, id) => s + Number((options.find(o => o.id === id) || {}).price_delta || 0), 0)
   useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k) }, [])
@@ -494,7 +496,7 @@ function OptionSheet({ dish, options, halfPrice, onClose, onAdd }) {
     <div className="c-sheet" role="dialog" aria-modal="true" aria-label={`Choose options for ${dish.name}`}>
       <h2 className="c-h2">{dish.name}</h2>
       {sizes.length > 0 && <fieldset className="c-opt-group"><legend>Choose a size</legend>{sizes.map(o => <label key={o.id} className={size === o.id ? 'c-opt on' : 'c-opt'}><input type="radio" name="size" checked={size === o.id} onChange={() => setSize(o.id)} /><span>{o.name}</span><b>{o.shown != null ? money(o.shown) : Number(o.price_delta) > 0 ? `+${money(o.price_delta)}` : 'Included'}</b></label>)}</fieldset>}
-      {extras.length > 0 && <fieldset className="c-opt-group"><legend>Extras <small>optional</small></legend>{extras.map(o => <label key={o.id} className={picked.includes(o.id) ? 'c-opt on' : 'c-opt'}><input type="checkbox" checked={picked.includes(o.id)} onChange={() => setPicked(p => p.includes(o.id) ? p.filter(x => x !== o.id) : [...p, o.id])} /><span>{o.name}</span><b>+{money(o.price_delta)}</b></label>)}</fieldset>}
+      {extras.length > 0 && <fieldset className="c-opt-group"><legend>Extras <small>optional</small></legend>{extras.map(o => { const n = countOf(o.id); return <div key={o.id} className={n ? 'c-opt c-opt-x on' : 'c-opt c-opt-x'}><span>{o.name}</span><b>+{money(o.price_delta)}</b><div className="c-qty">{n > 0 && <><button type="button" className="c-step" onClick={() => bump(o.id, -1)} aria-label={`Remove one ${o.name}`}><Ico n="minus" size={16} /></button><output className="c-n" aria-label={`${o.name} quantity`}>{n}</output></>}<button type="button" className="c-step" onClick={() => bump(o.id, 1)} aria-label={`Add ${o.name}`} disabled={picked.length >= 8}><Ico n="plus" size={16} /></button></div></div> })}</fieldset>}
       <div className="c-sheet-foot"><button type="button" className="c-btn c-btn-line" onClick={onClose}>Cancel</button><button type="button" className="c-cta c-cta-accent c-sheet-add" disabled={sizes.length > 0 && !size} onClick={() => onAdd(ids())}>Add · {money(unit)}</button></div>
     </div>
   </div>

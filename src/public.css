@@ -469,3 +469,10 @@ html{-webkit-text-size-adjust:100%}
 .c-app ul.c-menu .c-add{width:100%;min-width:0}
 .c-app ul.c-menu .c-subline{padding:6px 12px 10px;flex-basis:auto;border-top:1px dashed var(--c-line)}
 .c-app ul.c-menu .c-dish.sold .c-qty{display:none}
+
+/* Extras with a quantity */
+.c-app .c-opt-x{display:flex;align-items:center;gap:10px;cursor:default}
+.c-app .c-opt-x>span{flex:1;min-width:0}
+.c-app .c-opt-x .c-qty{gap:6px}
+.c-app .c-opt-x .c-step{width:36px;height:36px}
+.c-app .c-opt-x .c-n{min-width:20px;text-align:center;font-weight:700}

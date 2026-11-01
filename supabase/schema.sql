@@ -459,13 +459,14 @@ begin
     opts_price := 0; opts_text := ''; size_n := 0;
     opt_ids := case when jsonb_typeof(it->'options') = 'array' then it->'options' else '[]'::jsonb end;
     if jsonb_array_length(opt_ids) > 10 then raise exception 'Too many options'; end if;
-    if (select count(*) from jsonb_array_elements_text(opt_ids)) <> (select count(*) from public.recipe_options o where o.recipe_id = rc.id and o.id::text in (select jsonb_array_elements_text(opt_ids))) then
+    if (select count(*) from jsonb_array_elements_text(opt_ids)) <> (select count(*) from jsonb_array_elements_text(opt_ids) e join public.recipe_options o on o.id::text = e and o.recipe_id = rc.id) then
       raise exception 'An option is no longer available';
     end if;
-    for opt in select o.kind, o.name, o.price_delta from public.recipe_options o where o.recipe_id = rc.id and o.id::text in (select jsonb_array_elements_text(opt_ids)) order by o.sort_order, o.name loop
-      opts_price := opts_price + opt.price_delta;
-      opts_text := opts_text || case when opts_text = '' then '' else ', ' end || opt.name;
-      if opt.kind = 'size' then size_n := size_n + 1; end if;
+    -- the same extra can be picked more than once (2 x raita): price and label count each pick
+    for opt in select o.kind, o.name, o.price_delta, count(*)::int as n from jsonb_array_elements_text(opt_ids) e join public.recipe_options o on o.id::text = e and o.recipe_id = rc.id group by o.kind, o.name, o.price_delta, o.sort_order order by o.sort_order, o.name loop
+      opts_price := opts_price + opt.price_delta * opt.n;
+      opts_text := opts_text || case when opts_text = '' then '' else ', ' end || opt.name || case when opt.n > 1 then ' x' || opt.n else '' end;
+      if opt.kind = 'size' then size_n := size_n + opt.n; end if;
     end loop;
     select exists (select 1 from public.recipe_options o where o.recipe_id = rc.id and o.kind = 'size') into has_size;
     if size_n > 1 or (has_size and size_n = 0) then raise exception 'OPTIONS: Choose a size for %', rc.name; end if;
