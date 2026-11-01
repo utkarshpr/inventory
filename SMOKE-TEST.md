@@ -73,3 +73,5 @@ Leave the dashboard open. The strip shows **Live**, **Sound on**, **Screen stays
 - Tap Confirm payment. On the customer's phone the popup should change to "Payment confirmed" and then disappear, and the QR code and UPI ID go away.
 - Pay a small amount by scanning the QR code from another phone (or screenshot it and scan from the gallery), and by copying the UPI ID. Confirm the payment arrives and that you can match it with the order number.
 - After paying, on the customer's phone type a transaction ID (optional) and tap "I've paid". On the dashboard (even on the other restaurant) a Verify payment popup should appear with a sound and the transaction ID. Accept it and confirm the customer's popup changes to Payment confirmed. Repeat and Reject with a reason: the customer should see the reason and be able to pay again.
+- Orders: the tabs New / Cooking / Ready / Delivered / Cancelled show the right orders and counts; move an order to Cooking and watch the counts change.
+- Payments: the page lists customers with Paid / Not paid / To verify. Accept a UPI payment from here, and press Mark received on a delivered cash order.

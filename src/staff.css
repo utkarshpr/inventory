@@ -417,3 +417,37 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .oa-txn code{font-family:inherit;font-weight:700;word-break:break-all}
 .oa-verify-actions{display:flex;gap:10px;align-items:center;justify-content:space-between}
 .oa-reject{min-height:44px;padding:0 16px;border-radius:12px;border:1.5px solid currentColor;background:transparent;color:inherit;font:inherit;font-weight:700;cursor:pointer}
+
+/* ---- status tabs + payments page ---- */
+.tab-n{display:inline-block;margin-left:6px;min-width:20px;padding:0 6px;border-radius:999px;background:rgba(127,127,127,.2);font-style:normal;font-size:12px;font-weight:700;line-height:20px;text-align:center}
+.tab.active-tab .tab-n{background:rgba(255,255,255,.28)}
+.status-tabs{flex-wrap:wrap}
+.pay-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.pay-tile{padding:12px 14px;border-radius:16px;border:1px solid var(--line,#3a3a3a);display:grid;gap:2px}
+.pay-tile span{font-size:13px;color:var(--muted)}
+.pay-tile b{font-size:22px}
+.pay-tile small{font-size:12px;color:var(--muted)}
+.pay-tile.ok b{color:#2f7d4a}.pay-tile.bad b{color:#B83221}.pay-tile.wait b{color:#9a6400}
+.pay-list ul{list-style:none;margin:0;padding:0;display:grid}
+.pay-row{display:grid;grid-template-columns:1fr auto;grid-template-areas:"who amt" "state state";gap:8px 12px;padding:14px 4px;border-bottom:1px solid rgba(127,127,127,.2);align-items:center}
+.pay-row:last-child{border-bottom:0}
+.pay-who{grid-area:who;display:grid;min-width:0}
+.pay-who b{font-size:16px}
+.pay-who span{font-size:13px;color:var(--muted);overflow-wrap:anywhere}
+.pay-who code{font-family:inherit;font-weight:700}
+.pay-amt{grid-area:amt;display:grid;justify-items:end}
+.pay-amt b{font-size:17px}
+.pay-amt span{font-size:12px;color:var(--muted)}
+.pay-state{grid-area:state;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.pay-pill{padding:4px 12px;border-radius:999px;font-size:13px;font-weight:700}
+.pay-pill.paid{background:rgba(47,125,74,.16);color:#2f7d4a}
+.pay-pill.unpaid{background:rgba(184,50,33,.14);color:#B83221}
+.pay-pill.verify{background:rgba(224,160,40,.22);color:#9a6400}
+.pay-foot{margin:12px 2px 0;font-size:13px;color:var(--muted);line-height:1.5}
+@media (min-width:761px){.pay-row{grid-template-columns:1.4fr .8fr auto;grid-template-areas:"who amt state"}.pay-state{justify-content:flex-end}}
+@media (max-width:760px){.app-shell .sidebar .nav{font-size:10px;padding:6px 0}}
+
+/* tabs stay on one line and scroll sideways on phones */
+.status-tabs,.pay-page .tabs{display:flex;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;max-width:100%}
+.status-tabs::-webkit-scrollbar,.pay-page .tabs::-webkit-scrollbar{display:none}
+.status-tabs .tab,.pay-page .tabs .tab{flex:none;white-space:nowrap;display:inline-flex;align-items:center}
