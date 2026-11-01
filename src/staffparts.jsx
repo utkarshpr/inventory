@@ -201,20 +201,20 @@ export function systemNotify(order, restaurantName) {
 const VAPID_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY
 const keyBytes = (b64) => { const pad = '='.repeat((4 - b64.length % 4) % 4), raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))) }
 
-export function AppInstallCard({ notify, restaurant }) {
+export function AppInstallCard({ notify, restaurant, restaurants = [] }) {
   const pushOk = Boolean(VAPID_KEY) && typeof window !== 'undefined' && 'PushManager' in window && 'serviceWorker' in navigator && Boolean(supabase)
   const [pushOn, setPushOn] = useState(false), [pushBusy, setPushBusy] = useState(false)
-  const rid = restaurant && restaurant.id
+  const ids = restaurants.map(r => r.id).filter(Boolean), idKey = ids.join(',')
   useEffect(() => {   // is this phone already subscribed for the restaurant being managed?
     setPushOn(false)
-    if (!pushOk || !rid) return
+    if (!pushOk || !ids.length) return
     let alive = true
     navigator.serviceWorker.ready.then(reg => reg.pushManager.getSubscription()).then(sub => {
       if (!sub || !alive) return
-      return supabase.from('push_subscriptions').select('endpoint').eq('endpoint', sub.endpoint).eq('restaurant_id', rid).maybeSingle().then(({ data }) => { if (alive) setPushOn(Boolean(data)) })
+      return supabase.from('push_subscriptions').select('endpoint, restaurant_id').eq('endpoint', sub.endpoint).then(({ data }) => { if (alive) setPushOn(ids.every(id => (data || []).some(r => r.restaurant_id === id))) })
     }).catch(() => {})
     return () => { alive = false }
-  }, [pushOk, rid])
+  }, [pushOk, idKey])
   const turnPushOn = async () => {
     setPushBusy(true)
     try {
@@ -223,17 +223,17 @@ export function AppInstallCard({ notify, restaurant }) {
       const reg = await navigator.serviceWorker.ready
       const sub = (await reg.pushManager.getSubscription()) || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(VAPID_KEY) })
       const j = sub.toJSON()
-      const { error } = await supabase.from('push_subscriptions').upsert({ endpoint: j.endpoint, restaurant_id: rid, p256dh: j.keys.p256dh, auth: j.keys.auth })
+      const { error } = await supabase.from('push_subscriptions').upsert(ids.map(id => ({ endpoint: j.endpoint, restaurant_id: id, p256dh: j.keys.p256dh, auth: j.keys.auth })))
       if (error) return notify && notify(`Could not turn on alerts: ${error.message}`)
-      setPushOn(true); notify && notify(`Closed-app alerts on for ${restaurant.name}`)
+      setPushOn(true); notify && notify('Closed-app alerts on for both restaurants')
     } catch (e) { notify && notify(`Could not turn on alerts: ${e.message || 'unknown error'}`) } finally { setPushBusy(false) }
   }
   const turnPushOff = async () => {
     setPushBusy(true)
     try {
       const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription()
-      if (sub) await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint).eq('restaurant_id', rid)
-      setPushOn(false); notify && notify(`Closed-app alerts off for ${restaurant.name}`)
+      if (sub) await supabase.from('push_subscriptions').delete().eq('endpoint', sub.endpoint)
+      setPushOn(false); notify && notify('Closed-app alerts off')
     } catch { /* ignore */ } finally { setPushBusy(false) }
   }
   const supported = typeof Notification !== 'undefined'
@@ -257,8 +257,8 @@ export function AppInstallCard({ notify, restaurant }) {
         {installed ? <span className="stock">Installed</span> : prompt ? <button className="primary app-btn" onClick={install}>Install app</button> : null}</div>
       <div className="app-row"><div><b>New-order notifications</b><small>{perm === 'granted' ? 'On for this device. Shown when the app is in the background.' : perm === 'denied' ? 'Blocked. Allow notifications for this site in your browser settings.' : perm === 'unsupported' ? (ios && !installed ? 'On iPhone, add the app to your home screen first, then turn this on.' : 'This browser does not support notifications.') : 'Off. Turn on to see new orders even when you are in another app.'}</small></div>
         {perm === 'default' && <button className="primary app-btn" onClick={ask}>Turn on</button>}{perm === 'granted' && <span className="stock">On</span>}</div>
-      {!pushOk && restaurant && <div className="app-row"><div><b>Alerts when the app is closed</b><small>{!VAPID_KEY ? 'Not set up yet: this version of the app was built without the VITE_VAPID_PUBLIC_KEY setting. Add it in Vercel, then redeploy.' : !supabase ? 'Not available: the app is not connected to Supabase.' : !('serviceWorker' in navigator) || !('PushManager' in window) ? (ios && !installed ? 'On iPhone this only works from the home screen app. Tap Share, then Add to Home Screen, and open the app from there.' : 'This browser does not support closed-app alerts. Try Chrome on Android, or the installed home screen app on iPhone.') : 'Not available right now.'}</small></div></div>}
-      {pushOk && restaurant && <div className="app-row"><div><b>Alerts when the app is closed · {restaurant.name}</b><small>{pushOn ? `On for this phone. New ${restaurant.name} orders reach you even when the app is closed. Other restaurants are not mixed in.` : `Off. Turn on to get ${restaurant.name} orders even when the app is closed. Do this on each restaurant you manage.`}</small></div>
+      {!pushOk && <div className="app-row"><div><b>Alerts when the app is closed</b><small>{!VAPID_KEY ? 'Not set up yet: this version of the app was built without the VITE_VAPID_PUBLIC_KEY setting. Add it in Vercel, then redeploy.' : !supabase ? 'Not available: the app is not connected to Supabase.' : !('serviceWorker' in navigator) || !('PushManager' in window) ? (ios && !installed ? 'On iPhone this only works from the home screen app. Tap Share, then Add to Home Screen, and open the app from there.' : 'This browser does not support closed-app alerts. Try Chrome on Android, or the installed home screen app on iPhone.') : 'Not available right now.'}</small></div></div>}
+      {pushOk && ids.length > 0 && <div className="app-row"><div><b>Alerts when the app is closed · all restaurants</b><small>{pushOn ? 'On for this phone. New orders from any restaurant reach you even when the app is closed. The alert names the restaurant.' : 'Off. Turn on to get new orders from every restaurant, even when the app is closed.'}</small></div>
         {pushOn ? <button className="text-btn" disabled={pushBusy} onClick={turnPushOff}>Turn off</button> : <button className="primary app-btn" disabled={pushBusy} onClick={turnPushOn}>Turn on</button>}</div>}
       <p className="lset-note">{pushOk ? 'Alerts for a closed app come from the server. The phone alert topic above (ntfy) is a separate backup.' : 'Notifications appear while the app is open or in the background. If the app is fully closed, phone alerts (the topic above, via ntfy) still reach you.'}</p>
     </div>

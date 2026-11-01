@@ -99,7 +99,7 @@ A third restaurant needs a row in `restaurants` plus a logo and theme entry ther
 - **To cook** page: pending orders added up by dish for the selected restaurant (filter by not started / cooking and by delivery day, with Copy list).
 
 ## Alerts when the app is closed (web push)
-This is optional and free. A new customer order reaches staff phones even when the app is closed, and only for the restaurant that phone subscribed to.
+This is optional and free. A new customer order reaches staff phones even when the app is closed, for either restaurant. The alert names the restaurant.
 
 1. Make a key pair: `npx web-push generate-vapid-keys`. Keep the private key secret.
 2. In Vercel, add `VITE_VAPID_PUBLIC_KEY` (the public key) and redeploy.
@@ -108,7 +108,8 @@ This is optional and free. A new customer order reaches staff phones even when t
 4. Deploy the function: `supabase functions deploy send-push --no-verify-jwt`
 5. Tell the database where it is (SQL editor, same random string as step 3). `pg_net` must be enabled:
    `update public.push_config set function_url = 'https://YOUR-PROJECT-REF.supabase.co/functions/v1/send-push', shared_secret = '<same random string>';`
-6. On each staff phone: open the site, install the app, then Settings → App & notifications → "Alerts when the app is closed" → Turn on. Do it once for each restaurant that phone should hear about.
+6. On each staff phone: open the site, install the app, then Settings → App & notifications → "Alerts when the app is closed" → Turn on.
 
 The ntfy topic in Settings keeps working as a separate backup.
 - **Sales goal** (Overview): combined sales of both restaurants against a goal the owner sets, for example "London trip", ₹1L. A bar shows how far you are, with each restaurant's share. Edit the name, target (type 50K, 1L, 1Cr or a number) and start date with "Edit goal". Cancelled orders are not counted.
+- **Order alerts reach you for both restaurants, whichever one you have open.** The popup, sound and phone notification all name the restaurant, and "View order" switches to it. The order list, badges and stock still only show the restaurant you are managing.
