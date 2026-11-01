@@ -72,7 +72,7 @@ create table if not exists public.restaurants (
 );
 
 insert into public.restaurants (slug, name, tagline, order_prefix, sort_order) values
-  ('salt-and-saffron', 'Salt & Saffron', 'Cloud kitchen, Pune', 'SS', 1),
+  ('salt-and-saffron', 'Salt & Saffron', 'Cloud kitchen', 'SS', 1),
   ('oven-and-chives', 'Oven & Chives', 'Fresh from the oven', 'OC', 2)
 on conflict (slug) do nothing;
 
