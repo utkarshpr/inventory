@@ -511,3 +511,21 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-tab.on{background:var(--c-btn);color:var(--c-btn-ink)}
 .c-app .c-mine-back{margin:14px 0 0;width:100%}
 .c-app form[hidden]{display:none}
+
+.c-app .c-cats{display:grid;gap:10px;margin:0 0 14px}
+.c-app .c-cat-chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;flex-wrap:nowrap}
+.c-app .c-cat-chips .c-chip{flex:none;cursor:pointer}
+.c-app .c-active-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;margin:0 0 12px;padding:12px 16px;border-radius:16px;border:1px solid var(--c-accent-solid);background:color-mix(in srgb,var(--c-accent-solid) 12%,var(--c-surface));color:var(--c-ink);font:inherit;text-align:left;cursor:pointer}
+.c-app .c-deliv-sum{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 14px;padding:14px 16px;border-radius:16px;background:var(--c-surface);border:1px solid var(--c-line)}
+.c-app .c-mine-again{display:block;width:100%;margin:12px 0 0}
+
+/* Rating and tracking inside the order popup: stay inside the box, readable colours */
+.c-app .c-mine-dialog .c-track,.c-app .c-mine-dialog .c-rate,.c-app .c-mine-dialog .c-rated{color:var(--c-ink)}
+.c-app .c-rate{box-sizing:border-box;width:100%;text-align:left;padding:14px 12px}
+.c-app .c-rate *{box-sizing:border-box}
+.c-app .c-rate .c-input{width:100%;max-width:100%}
+.c-app .c-rate .c-cta,.c-app .c-rate button[type=submit]{width:100%}
+.c-app .c-stars{justify-content:space-between;gap:6px}
+.c-app .c-stars button{flex:1 1 0;min-width:0;width:auto;max-width:56px;height:46px}
+.c-app .c-mine-dialog .c-steps{text-align:left}
+.c-app .c-mine-dialog .c-track-note,.c-app .c-mine-dialog .c-track .c-sub{text-align:center}

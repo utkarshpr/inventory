@@ -189,10 +189,12 @@ export function RestaurantSettings({ r, secrets, onSave }) {
 }
 
 /* Is the kitchen screen ready to catch orders? Connection, sound and screen-awake at a glance. */
-export function LiveStrip({ live, soundOn, soundReady, onSound, onUnlock, awake, awakeSupported, onAwake }) {
+export function LiveStrip({ snoozed, snoozeUntil, onSnooze, onResume, live, soundOn, soundReady, onSound, onUnlock, awake, awakeSupported, onAwake }) {
   return <div className="live-strip" role="status">
-    <span className={live ? 'ls-pill ok' : 'ls-pill bad'}><i aria-hidden="true" />{live ? 'Live' : 'Offline. Reconnecting…'}</span>
+    <span className={live ? 'ls-pill ok' : 'ls-pill bad'}><i aria-hidden="true" />{live ? 'Live' : 'Offline. New orders may not show. Reconnecting…'}</span>
     <button type="button" className={soundOn ? 'ls-chip on' : 'ls-chip'} aria-pressed={soundOn} onClick={onSound}>{soundOn ? 'Sound on' : 'Sound off'}</button>
+    {soundOn && !snoozed && onSnooze && <><button type="button" className="ls-chip" onClick={() => onSnooze(15)}>Snooze 15 min</button><button type="button" className="ls-chip" onClick={() => onSnooze(0)}>Mute tonight</button></>}
+    {soundOn && snoozed && <button type="button" className="ls-chip warn" onClick={onResume}>Paused until {new Date(snoozeUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · Resume</button>}
     {soundOn && !soundReady && <button type="button" className="ls-chip warn" onClick={onUnlock}>Tap to enable sound</button>}
     {awakeSupported && <button type="button" className={awake ? 'ls-chip on' : 'ls-chip'} aria-pressed={awake} onClick={onAwake}>{awake ? 'Screen stays on' : 'Screen may sleep'}</button>}
   </div>
@@ -407,7 +409,7 @@ export function CouponsSettings({ restaurants, notify }) {
 /* ---------- Backup: download your data ---------- */
 const csvCell = (v) => { const t = v == null ? '' : String(v); return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t }
 const toCsv = (rows) => '\ufeff' + rows.map(r => r.map(csvCell).join(',')).join('\r\n')
-const download = (name, text, type) => { const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
+const download = (name, text, type) => { try { localStorage.setItem('last-backup', String(Date.now())) } catch { /* optional */ } const url = URL.createObjectURL(new Blob([text], { type })), a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000) }
 const itemsText = (items) => (Array.isArray(items) ? items : []).map(i => typeof i === 'string' ? i : `${i.quantity} × ${i.name}`).join('; ')
 export function BackupCard({ restaurants, notify }) {
   const [busy, setBusy] = useState('')
@@ -437,7 +439,10 @@ export function BackupCard({ restaurants, notify }) {
     } catch (e) { notify && notify(`Could not download: ${e.message}`) } finally { setBusy('') }
   }
   const btn = (kind, label) => <button type="button" className="text-btn backup-btn" disabled={Boolean(busy)} onClick={() => run(kind)}>{busy === kind ? 'Preparing…' : label}</button>
+  let lastBackup = 0; try { lastBackup = Number(localStorage.getItem('last-backup')) || 0 } catch { /* optional */ }
+  const backupDays = lastBackup ? Math.floor((Date.now() - lastBackup) / 864e5) : null
   return <section className="panel backupcard" aria-label="Backup">
+    {(backupDays === null || backupDays > 7) && <p className="backup-warn" role="alert">{backupDays === null ? 'You have not downloaded a backup on this device yet. Download one now.' : `Your last backup was ${backupDays} days ago. Download a fresh one.`}</p>}
     <div className="panel-heading"><div><h3>Backup · download your data</h3><p>Both restaurants together. Spreadsheets open in Excel or Google Sheets. The full backup keeps everything in one file.</p></div></div>
     <div className="rset-body backup-row">{btn('orders', 'Orders (spreadsheet)')}{btn('menu', 'Menu & recipes (spreadsheet)')}{btn('stock', 'Stock (spreadsheet)')}{btn('full', 'Full backup (file)')}</div>
   </section>
@@ -445,6 +450,7 @@ export function BackupCard({ restaurants, notify }) {
 
 /* ---------- Team: who can do what (owner only) ---------- */
 const ROLE_TEXT = { owner: 'Owner: everything', cook: 'Cook: orders and To cook', delivery: 'Delivery: orders and payments' }
+const ROLE_HELP = 'Owner: everything, including Settings and Team. Cook: Orders and To cook. Delivery: Orders and Payments.'
 export function TeamCard({ notify }) {
   const [team, setTeam] = useState(null), [email, setEmail] = useState(''), [role, setRole] = useState('cook'), [err, setErr] = useState('')
   const load = () => { if (!supabase) return setTeam([]); supabase.rpc('list_staff').then(({ data }) => setTeam(data || [])) }
@@ -459,7 +465,8 @@ export function TeamCard({ notify }) {
     setEmail(''); load(); notify && notify(r === 'remove' ? 'Access removed' : 'Role saved')
   }
   return <section className="panel teamcard" aria-label="Team">
-    <div className="panel-heading"><div><h3>Team · who can do what</h3><p>Give each person their own sign-in under Authentication → Users in Supabase, then give them a role here. Only owners can change settings.</p></div></div>
+    <div className="panel-heading"><div><h3>Team · who can do what</h3><p>Give each person their own sign-in under Authentication → Users in Supabase, then give them a role here. Only owners can change settings.</p></div>
+    <p className="role-help">{ROLE_HELP}</p></div>
     <form className="rset-body" onSubmit={save}>
       <div className="rset-row">
         <label className="rset-field">Email<input type="email" aria-label="Team email" value={email} onChange={e => setEmail(e.target.value)} placeholder="cook@example.com" autoCapitalize="none" /></label>
@@ -483,4 +490,37 @@ export function usePaged(list, size = 10, resetKey = '') {
 export function Pager({ p }) {
   if (!p || p.pages <= 1) return null
   return <nav className="pager" aria-label="Pages"><button type="button" className="app-btn" disabled={p.page === 0} onClick={() => p.setPage(p.page - 1)}>Previous</button><span>Page {p.page + 1} of {p.pages} · {p.total} total</span><button type="button" className="app-btn" disabled={p.page >= p.pages - 1} onClick={() => p.setPage(p.page + 1)}>Next</button></nav>
+}
+
+/* One list of everything that needs the kitchen's attention right now */
+export function NeedsAttention({ orders, inventory, go }) {
+  const live = orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered')
+  const rows = [
+    [live.filter(o => o.deliveryFeePending).length, 'waiting for a delivery charge', 'Orders'],
+    [live.filter(o => o.paymentStatus === 'pending' && o.paymentClaimedAt).length, 'UPI payments to check', 'Payments'],
+    [live.filter(o => o.paymentStatus === 'pending' && !o.paymentClaimedAt && !o.deliveryFeePending).length, 'UPI orders not paid yet', 'Payments'],
+    [live.filter(o => o.status === 'New' && o.paymentStatus !== 'pending' && !o.deliveryFeePending).length, 'new orders to start', 'Orders'],
+    [(inventory || []).filter(i => i.stock <= i.reorder).length, 'ingredients low on stock', 'Inventory'],
+  ].filter(r => r[0] > 0)
+  return <section className="panel attention" aria-label="Needs attention">
+    <h3>Needs attention</h3>
+    {rows.length ? <ul>{rows.map(([n, label, page]) => <li key={label}><b>{n}</b><span>{label}</span><button type="button" className="text-btn" onClick={() => go(page)}>Open</button></li>)}</ul> : <p className="attention-ok">All caught up ✓</p>}
+  </section>
+}
+
+export function HelpPage() {
+  const items = [
+    ['Add or change a dish', 'Recipes → New recipe. Open a dish to add a photo, plates per day, half plate, sizes and extras, or to mark it sold out for today.'],
+    ['Handle a new order', 'Orders → tap Start cooking, then Mark ready, then Mark delivered. UPI orders can start cooking only after you confirm the payment.'],
+    ['Set a delivery charge', 'On an order that says "Delivery charge needed", tap Set delivery charge, pick an amount and save. The customer sees it at once.'],
+    ['Confirm a UPI payment', 'When the sound plays and a popup appears, check your UPI app, then press Accept. Press Reject with a reason if the money did not arrive.'],
+    ['Cancel an order', 'Change its status to Cancelled and give a reason. The customer sees the reason, and the ingredients go back into stock.'],
+    ['Close the kitchen', 'Use the Open / Closed switch at the top. Customers see your closing message and can order from the other restaurant.'],
+    ['Pause the order sound', 'Tap Snooze 15 min or Mute tonight under the page title. Tap Resume to bring it back.'],
+    ['Close the day', 'Reports → Today so far. Press Print for a one-page summary of sales, UPI and cash.'],
+    ['Back up your data', 'Settings → Backup. Download once a week. The app reminds you when it has been too long.'],
+    ['Add a team member', 'Create their sign-in in Supabase (Authentication → Users), then add their email under Settings → Team and choose Cook or Delivery.'],
+  ]
+  return <section className="panel help-page"><div className="panel-heading"><div><h3>Help</h3><p>The everyday jobs, in plain steps.</p></div></div>
+    <ul>{items.map(([t, d]) => <li key={t}><b>{t}</b><span>{d}</span></li>)}</ul></section>
 }

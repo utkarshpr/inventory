@@ -168,3 +168,20 @@ Orders, Payments, To cook, Customers, Recipes, Inventory, Coupons and Team all s
 ## Database indexes
 
 Section 12 of `supabase/schema.sql` adds indexes for the common lookups (orders by restaurant/status/phone/delivery day, unpaid UPI, recipes, inventory, ingredients, coupons, push subscriptions). Run the schema again to apply them; running it twice is safe.
+
+## Easier to use (customer and kitchen)
+
+**Customers:** repeat customers see "Delivering to Baner · Meera · ••••1234 · Change" instead of the form. The menu has section chips (Starter, Main…), and a search box once it has more than 15 dishes. A bar above the menu shows "Your order SS-…: cooking" and opens My orders. The order popup has **Order again**.
+
+**Kitchen:**
+- **One-tap buttons** on each order: Start cooking, then Mark ready, then Mark delivered (hidden while a UPI payment is unconfirmed).
+- **Needs attention** card on Overview: orders waiting for a delivery charge, UPI payments to check, UPI orders not paid, new orders to start, low stock. Each has an Open button.
+- **Snooze 15 min** and **Mute tonight** (until 6 am) for the new-order sound, with Resume.
+- **Delivery charge presets:** the charge dialog remembers the last amounts per area (for example "Baner ₹40").
+- **Today so far** on Reports: orders, sales, UPI received, UPI not confirmed, cash to collect, still open. Print gives a one-page day-end report.
+- **Search** on Orders finds by name, order number, phone, address or dish.
+- **Help** page (More menu) with the everyday jobs. Settings shows a red reminder when your last backup is over a week old.
+
+## WhatsApp message to the customer
+
+Each order card has a **WhatsApp** button. It opens the customer's number with a ready message for the order's current status (received, cooking, ready, delivered or cancelled). The message has the restaurant name, order number, order date and time, delivery day, each item with quantity and price, delivery charge, total, payment status, and ends with "Please come back again!". You press send.

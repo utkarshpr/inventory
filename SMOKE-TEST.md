@@ -88,3 +88,14 @@ Leave the dashboard open. The strip shows **Live**, **Sound on**, **Screen stays
 8. Payments → filter *Not paid* / *Waiting for check* / *Paid*; WhatsApp reminder opens a message.
 9. More → Customers lists customers with orders and spend.
 10. Settings → Team: add a cook, sign in as them: they see only Orders and To cook.
+
+## 12. Tabs, phone sign-in, easier use
+
+1. Order page: Menu and My orders tabs. In My orders enter a 10-digit number: orders list newest first (4 per page). Tap one: popup with items, prices, delivery charge, total.
+2. Place two orders quickly from one phone: both appear. In Orders, set the delivery charge on one: its popup updates within about 5 seconds.
+3. Reload the order page after ordering: you see "Delivering to … Change" instead of the form. Tap Change to edit.
+4. Overview shows Needs attention. Start cooking / Mark ready / Mark delivered work with one tap.
+5. Snooze 15 min pauses the sound; Resume brings it back.
+6. Reports → Today so far, Print opens a one-page report.
+7. Press WhatsApp on an order: the message lists items with prices, delivery charge, total, payment status and "Please come back again!".
+8. Lists in Orders, Payments, Customers, Recipes, Inventory show 10 per page.

@@ -197,9 +197,17 @@ function OrderPage({ r, list }) {
   const [hasSaved, setHasSaved] = useState(Boolean(saved.phone))
   const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [payment, setPayment] = useState(PAYMENTS[0]), [notes, setNotes] = useState('')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [placed, setPlaced] = useState(null), [dialog, setDialog] = useState(false)
+  const [dishQ, setDishQ] = useState(''), [editDetails, setEditDetails] = useState(false), [activeOrder, setActiveOrder] = useState(null)
   const [tab, setTab] = useState('menu')   // 'menu' = add to cart and order, 'orders' = sign in with a phone number, see and track orders
   const [custPhone, setCustPhone] = useState(() => { try { const v = digits10((JSON.parse(localStorage.getItem('customer-details') || '{}') || {}).phone); return /^[6-9]\d{9}$/.test(v) ? v : '' } catch { return '' } })   // logged in by phone number alone
   useEffect(() => { if (custPhone) setPhone(cur => cur || custPhone) }, [custPhone])   // the order form uses the number you signed in with
+  useEffect(() => {   // the newest order that is still on its way, shown as a small bar above the menu
+    if (!custPhone || !supabase) return setActiveOrder(null)
+    let alive = true
+    const look = async () => { const { data } = await supabase.rpc('track_orders_by_phone', { p_phone: custPhone, p_limit: 3, p_offset: 0, p_restaurant: r.slug }); if (!alive || !data) return; setActiveOrder((data.orders || []).find(o => o.status !== 'Delivered' && o.status !== 'Cancelled') || null) }
+    look(); const t = setInterval(look, 10000)
+    return () => { alive = false; clearInterval(t) }
+  }, [custPhone, placed && placed.ref])
   const [copied, setCopied] = useState(false), [forcedClosed, setForcedClosed] = useState('')
   const [feeState, setFeeState] = useState(null)   // { ref, status: 'pending' | 'set', fee, total }: waiting for the kitchen's delivery charge
   const [payState, setPayState] = useState(null)   // { ref, status: 'pending' | 'received' } for a UPI order just placed
@@ -266,7 +274,7 @@ function OrderPage({ r, list }) {
   const distance = r.charge_mode === 'distance'   // the kitchen adds the delivery charge after the order is placed
   const fee = picked.length && !distance ? (freeAbove != null && total >= freeAbove ? 0 : feeBase) : 0
   const payable = total - discount + fee
-  const groups = Object.entries(dishes.reduce((acc, d) => { (acc[d.category || 'Menu'] ||= []).push(d); return acc }, {}))
+  const groups = Object.entries(dishes.filter(d => !dishQ.trim() || String(d.name).toLowerCase().includes(dishQ.trim().toLowerCase())).reduce((acc, d) => { (acc[d.category || 'Menu'] ||= []).push(d); return acc }, {}))
   const step = (key, delta) => {
     const d = dishes.find(x => x.id === key.split('|')[0])
     if (delta > 0 && d && !canAdd(d)) return
@@ -379,6 +387,7 @@ function OrderPage({ r, list }) {
           <a className="c-staff" href={`/${r.slug}`}>Back to {r.name}</a>
         </div>
       : <div className="c-page">
+          {tab === 'menu' && activeOrder && <button type="button" className="c-active-bar" onClick={() => setTab('orders')}><span>Your order <b>{activeOrder.order_number}</b>: {activeOrder.delivery_fee_pending ? 'waiting for the delivery charge' : activeOrder.status === 'New' ? 'received' : activeOrder.status.toLowerCase()}</span><span aria-hidden="true">›</span></button>}
           <div className="c-tabs" role="tablist" aria-label="Order page"><button type="button" role="tab" aria-selected={tab === 'menu'} className={tab === 'menu' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('menu')}>Menu</button><button type="button" role="tab" aria-selected={tab === 'orders'} className={tab === 'orders' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('orders')}>My orders</button></div>
           {tab === 'orders' && <><MyOrders r={r} all={list} phone={custPhone} setPhone={(v) => { setCustPhone(v); if (v) { try { const o = JSON.parse(localStorage.getItem('customer-details') || '{}') || {}; localStorage.setItem('customer-details', JSON.stringify({ ...o, phone: v })) } catch { /* optional */ } } else { try { localStorage.removeItem('customer-details') } catch { /* optional */ } setHasSaved(false) } }} refresh={placed && placed.ref} onPayClaimed={(ref) => setPayState(s => s && s.ref === ref ? { ...s, claimed: true, reason: '' } : s)} /><button type="button" className="c-btn c-btn-line c-mine-back" onClick={() => setTab('menu')}>Back to menu</button></>}
 
@@ -389,7 +398,8 @@ function OrderPage({ r, list }) {
             {menu === null && <p className="c-note">Loading the menu…</p>}
             {menuError && <p className="c-note c-note-bad">{menuError}</p>}
             {menu && !menu.length && !menuError && <p className="c-note">No dishes are on today's menu yet. Please check back soon.</p>}
-            {groups.map(([category, items]) => <section key={category}>
+            {menu && menu.length > 0 && <div className="c-cats">{menu.length > 15 && <input className="c-input c-dish-search" type="search" aria-label="Search dishes" placeholder="Search dishes" value={dishQ} onChange={e => setDishQ(e.target.value)} />}{groups.length > 1 && <div className="c-chips c-cat-chips" role="navigation" aria-label="Menu sections">{groups.map(([category]) => <button type="button" key={category} className="c-chip" onClick={() => { const el = document.getElementById('cat-' + category.replace(/\s+/g, '-')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>{category}</button>)}</div>}</div>}
+            {groups.map(([category, items]) => <section key={category} id={'cat-' + category.replace(/\s+/g, '-')}>
               <h2 className="c-h2 c-cat">{category}</h2>
               <ul className="c-menu">{items.map(d => {
                 const hasOpts = needsSheet(d), n = hasOpts ? 0 : (qty[d.id] || 0), left = leftOf(d)
@@ -414,10 +424,13 @@ function OrderPage({ r, list }) {
             {days && days.length > 0 && <div className="c-days" role="radiogroup" aria-label="Delivery day">{days.map(d => { const p = dayParts(d, today); return <label key={d} className={deliveryDate === d ? 'c-day on' : 'c-day'}><input type="radio" name="delivery-day" value={d} checked={deliveryDate === d} onChange={() => setDeliveryDate(d)} /><b>{p.top}</b><span>{p.bottom}</span></label> })}</div>}
 
             <h2 className="c-h2 c-cat">Delivery details</h2>
+            {hasSaved && !editDetails && name.trim() && address.trim() && digits10(phone).length === 10 && <div className="c-deliv-sum"><span>Delivering to <b>{(address.split(',').map(x => x.trim()).filter(Boolean).slice(-2)[0]) || address}</b> · {name.trim().split(' ')[0]} · {digits10(phone).slice(-4).padStart(10, '•')}</span><button type="button" className="c-linkbtn" onClick={() => setEditDetails(true)}>Change</button></div>}
+            <div hidden={hasSaved && !editDetails && Boolean(name.trim() && address.trim() && digits10(phone).length === 10)}>
             {hasSaved && <p className="c-saved">Filled in from your last order. <button type="button" className="c-linkbtn" onClick={() => { try { localStorage.removeItem('customer-details') } catch { /* ignore */ } setName(''); setPhone(''); setAddress(''); setHasSaved(false) }}>Not you? Clear</button></p>}
             <label className="c-field"><span>Name</span><input className="c-input" required autoComplete="name" value={name} onChange={e => setName(e.target.value)} /></label>
             <label className="c-field"><span>Phone number <small>10-digit mobile</small></span><input className="c-input" required maxLength={16} type="tel" inputMode="tel" autoComplete="tel" pattern="[0-9+ \-]{7,20}" title="Enter a valid phone number" value={phone} onChange={e => setPhone(e.target.value)} /></label>
             <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="House or flat, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
+            </div>
             <fieldset className="c-field c-pay"><legend>Payment</legend>
               <div className="c-chips">{PAYMENTS.map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
               {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">{distance ? "After the kitchen adds the delivery charge you'll see a QR code and the UPI ID to pay." : "After you place the order you'll see a QR code and the UPI ID to pay."}</p>}
@@ -560,7 +573,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
   const [res, setRes] = useState(null), [page, setPage] = useState(0), [sel, setSel] = useState(''), [detail, setDetail] = useState(null), [track, setTrack] = useState(false), [copied, setCopied] = useState(''), [input, setInput] = useState(''), [err, setErr] = useState('')
   const loadList = async () => {
     if (!supabase || !phone) return
-    const { data, error } = await supabase.rpc('track_orders_by_phone', { p_phone: phone, p_limit: MINE_PAGE, p_offset: page * MINE_PAGE })
+    const { data, error } = await supabase.rpc('track_orders_by_phone', { p_phone: phone, p_limit: MINE_PAGE, p_offset: page * MINE_PAGE, p_restaurant: r.slug })
     if (error) return setErr((error.message || '').replace(/^[A-Z_]+:\s*/, ''))
     setErr(''); setRes(data)
   }
@@ -606,7 +619,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
     {res && !orders.length && <p className="c-note">No orders yet for this number. They will show here after you order.</p>}
     <ul className="c-mine-list">
       {orders.map(o => <li key={o.order_number}><button type="button" className="c-mine-row" onClick={() => { setSel(o.order_number); setTrack(false) }}>
-        <span className="c-mine-main"><b>{o.order_number}</b><small>{o.restaurant} · {count(o)} item{count(o) === 1 ? '' : 's'} · {money(Number(o.total))}{o.delivery_fee_pending ? ' + delivery' : ''}</small>{o.delivery_fee_pending && <small className="c-mine-wait">Kitchen is adding the delivery charge</small>}</span>
+        <span className="c-mine-main"><b>{o.order_number}</b><small>{count(o)} item{count(o) === 1 ? '' : 's'} · {money(Number(o.total))}{o.delivery_fee_pending ? ' + delivery' : ''}</small>{o.delivery_fee_pending && <small className="c-mine-wait">Kitchen is adding the delivery charge</small>}</span>
         <span className={o.status === 'Cancelled' ? 'c-mine-status off' : 'c-mine-status'}>{statusText(o)}</span><span aria-hidden="true" className="c-mine-go">›</span>
       </button></li>)}
     </ul>
@@ -630,6 +643,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
             {!cancelled && d.payment && <p className="c-dlg-paywait">{d.payment === 'UPI' ? (d.payment_status === 'pending' ? (pending ? 'UPI: pay once the delivery charge is added' : d.payment_claimed ? 'Payment sent. Waiting for verification' : d.payment_reject_reason ? 'Payment not verified. Please check and send again' : 'UPI payment pending') : 'UPI payment confirmed ✓') : 'Cash on delivery'}</p>}
             {cancelled && d.cancel_reason && <p className="c-note c-note-bad">Cancelled: {d.cancel_reason}</p>}
             <UpiPay r={rr} order={{ ref: sel, total: Number(d.total), payment: 'UPI' }} show={upiDue} claimed={Boolean(d.payment_claimed)} reason={d.payment_reject_reason || ''} onClaimed={claimed} />
+            {d.restaurant_slug && !cancelled && <button type="button" className="c-btn c-btn-line c-mine-again" onClick={() => orderAgain(d.restaurant_slug, d.lines)}>Order again</button>}
             <button type="button" className="c-linkbtn c-mine-more" onClick={() => setTrack(t => !t)}>{track ? 'Hide tracking' : 'Track this order'}</button>
             {track && <TrackOrder key={sel} initialRef={sel} compact />}
           </>
