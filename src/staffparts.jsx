@@ -63,7 +63,8 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear, o
         <div className="oa-ref"><b>{o.id}</b><span>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
         <p className="oa-cust">{o.customer}</p>
         {o.deliveryDate && <p className="oa-deliver">Delivery: {deliveryText(o.deliveryDate, a.today)}</p>}
-        <ul className="oa-items">{a.lines.map((l, i) => <li key={i}><span>{l.quantity} × {l.name}</span>{l.price ? <span>₹{l.price * l.quantity}</span> : null}</li>)}</ul>
+        <ul className="oa-items">{a.lines.map((l, i) => <li key={i}><span>{l.quantity} × {l.name}{l.options ? ` (${l.options})` : ''}</span>{l.price ? <span>₹{l.price * l.quantity}</span> : null}</li>)}</ul>
+        {o.deliveryFeePending && <p className="oa-pay">Set the delivery charge for this order (Orders → Set delivery charge).</p>}
         {o.paymentStatus === 'pending' && <p className="oa-pay">UPI order: confirm the payment before cooking.</p>}
         {(o.payment || o.address) && <p className="oa-meta">{[o.payment, o.address].filter(Boolean).join(' · ')}</p>}
         <div className="oa-foot"><b className="oa-total">₹{o.total}</b><button type="button" className="oa-view" onClick={() => onView(a)}>View order</button></div>
@@ -76,13 +77,17 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear, o
 /* This restaurant's own delivery days and WhatsApp group. Changes only affect the selected restaurant. */
 export function RestaurantSettings({ r, secrets, onSave }) {
   const todayIso = zonedNow(r.timezone || 'Asia/Kolkata').date
-  const init = () => ({ mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', upi: r.upi_id || '', upiPersonal: Boolean(r.upi_personal), lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
+  const init = () => ({ chargeMode: r.charge_mode || 'fixed', fee: String(r.delivery_fee == null ? 0 : r.delivery_fee), freeAbove: r.free_delivery_above == null ? '' : String(r.free_delivery_above), prep: r.prep_minutes == null ? '' : String(r.prep_minutes), unpaidCancel: r.unpaid_cancel_minutes == null ? '' : String(r.unpaid_cancel_minutes), mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', upi: r.upi_id || '', upiPersonal: Boolean(r.upi_personal), lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
   const [f, setF] = useState(init)
   useEffect(() => { setF(init()) }, [r.id, secrets && secrets.alert_topic])
   const set = (patch) => setF(cur => ({ ...cur, ...patch }))
   const [testMsg, setTestMsg] = useState('')
   const topicOk = !f.topic.trim() || /^[A-Za-z0-9_-]{8,64}$/.test(f.topic.trim())
   const minOk = f.minOrder === '' || Number(f.minOrder) >= 0
+  const feeOk = f.fee === '' || Number(f.fee) >= 0
+  const freeOk = f.freeAbove === '' || Number(f.freeAbove) > 0
+  const prepOk = f.prep === '' || (Number(f.prep) >= 5 && Number(f.prep) <= 480)
+  const cancelOk = f.unpaidCancel === '' || (Number(f.unpaidCancel) >= 5 && Number(f.unpaidCancel) <= 1440)
   const upiOk = !f.upi.trim() || /^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/.test(f.upi.trim())
   const makeTopic = () => { const bytes = crypto.getRandomValues(new Uint8Array(10)); set({ topic: `${(r.order_prefix || 'kitchen').toLowerCase()}-${Array.from(bytes, b => (b % 36).toString(36)).join('')}` }); setTestMsg('') }
   const sendTest = async () => {
@@ -100,8 +105,8 @@ export function RestaurantSettings({ r, secrets, onSave }) {
   const aheadOptions = [...new Set([1, 2, 3, 5, 7, 10, 14, 21, 30, Number(f.ahead)])].sort((a, b) => a - b)
   const submit = (e) => {
     e.preventDefault()
-    if (customEmpty || !waOk || !topicOk || !minOk || !upiOk) return
-    onSave({ delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, upi_id: f.upi.trim() || null, upi_personal: f.upiPersonal, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
+    if (customEmpty || !waOk || !topicOk || !minOk || !upiOk || !feeOk || !freeOk || !prepOk || !cancelOk) return
+    onSave({ charge_mode: f.chargeMode, delivery_fee: Number(f.fee || 0), free_delivery_above: f.freeAbove === '' ? null : Number(f.freeAbove), prep_minutes: f.prep === '' ? null : Number(f.prep), unpaid_cancel_minutes: f.unpaidCancel === '' ? null : Number(f.unpaidCancel), delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, upi_id: f.upi.trim() || null, upi_personal: f.upiPersonal, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
   }
   return <form className="panel rset" onSubmit={submit}>
     <div className="panel-heading"><div><h3>Delivery days · {r.name}</h3><p>Customers can only pick these days when ordering. This changes {r.name} only.</p></div></div>
@@ -134,6 +139,22 @@ export function RestaurantSettings({ r, secrets, onSave }) {
       <label className="rset-field">Minimum order (₹)
         <input type="number" min="0" step="1" inputMode="numeric" value={f.minOrder} onChange={e => set({ minOrder: e.target.value })} />
         <small>Customers can't place an order below this amount. 0 means no minimum.</small></label>
+      <div className="rset-block" role="radiogroup" aria-label="Delivery charge">
+        <b>Delivery charge</b>
+        <div className="rset-modes">{[['fixed', 'Fixed charge'], ['distance', 'By distance']].map(([v, label]) => <label key={v} className={f.chargeMode === v ? 'rset-mode on' : 'rset-mode'}><input type="radio" name="charge-mode" checked={f.chargeMode === v} onChange={() => set({ chargeMode: v })} />{label}</label>)}</div>
+        {f.chargeMode === 'distance'
+          ? <small>The customer orders without a delivery charge. You set it on each order (Orders → Set delivery charge) and the customer sees the new total, then pays.</small>
+          : <div className="rset-row">
+              <label className="rset-field">Delivery charge (₹)<input type="number" min="0" step="1" inputMode="numeric" aria-label="Delivery charge" value={f.fee} onChange={e => set({ fee: e.target.value })} /><small>0 means free delivery.</small></label>
+              <label className="rset-field">Free delivery above (₹)<input type="number" min="1" step="1" inputMode="numeric" aria-label="Free delivery above" value={f.freeAbove} onChange={e => set({ freeAbove: e.target.value })} placeholder="optional" /><small>Orders at or above this amount pay no delivery.</small></label>
+            </div>}
+        {(!feeOk || !freeOk) && <p className="rset-warn" role="alert">Enter a delivery charge of 0 or more, and a free-delivery amount above 0.</p>}
+      </div>
+      <div className="rset-row">
+        <label className="rset-field">Usual preparation time (minutes)<input type="number" min="5" max="480" inputMode="numeric" aria-label="Preparation time" value={f.prep} onChange={e => set({ prep: e.target.value })} placeholder="e.g. 40" /><small>Customers see "Ready around …". Leave empty to hide it.</small></label>
+        <label className="rset-field">Cancel unpaid UPI orders after (minutes)<input type="number" min="5" max="1440" inputMode="numeric" aria-label="Cancel unpaid UPI after" value={f.unpaidCancel} onChange={e => set({ unpaidCancel: e.target.value })} placeholder="never" /><small>Only for UPI orders where the customer has not paid or said they paid. Empty means never.</small></label>
+      </div>
+      {(!prepOk || !cancelOk) && <p className="rset-warn" role="alert">Preparation time: 5 to 480 minutes. Cancel after: 5 to 1440 minutes.</p>}
       <label className="rset-check rset-lowstock"><input type="checkbox" aria-label="Low-stock alerts" checked={f.lowStock} onChange={e => set({ lowStock: e.target.checked })} />Alert me when an ingredient runs low <small>A notification once when stock falls to its reorder level. {r.name} only.</small></label>
       <label className="rset-field">UPI ID for {r.name}
         <input value={f.upi} onChange={e => set({ upi: e.target.value })} placeholder="e.g. saltsaffron@okaxis" autoCapitalize="none" autoCorrect="off" spellCheck="false" aria-label="UPI ID" aria-invalid={!upiOk} />
@@ -418,5 +439,34 @@ export function BackupCard({ restaurants, notify }) {
   return <section className="panel backupcard" aria-label="Backup">
     <div className="panel-heading"><div><h3>Backup · download your data</h3><p>Both restaurants together. Spreadsheets open in Excel or Google Sheets. The full backup keeps everything in one file.</p></div></div>
     <div className="rset-body backup-row">{btn('orders', 'Orders (spreadsheet)')}{btn('menu', 'Menu & recipes (spreadsheet)')}{btn('stock', 'Stock (spreadsheet)')}{btn('full', 'Full backup (file)')}</div>
+  </section>
+}
+
+/* ---------- Team: who can do what (owner only) ---------- */
+const ROLE_TEXT = { owner: 'Owner: everything', cook: 'Cook: orders and To cook', delivery: 'Delivery: orders and payments' }
+export function TeamCard({ notify }) {
+  const [team, setTeam] = useState(null), [email, setEmail] = useState(''), [role, setRole] = useState('cook'), [err, setErr] = useState('')
+  const load = () => { if (!supabase) return setTeam([]); supabase.rpc('list_staff').then(({ data }) => setTeam(data || [])) }
+  useEffect(load, [])
+  const save = async (e, r = role, em = email) => {
+    e && e.preventDefault(); setErr('')
+    if (!/^\S+@\S+\.\S+$/.test(em.trim())) return setErr('Enter the email the person signs in with.')
+    if (!supabase) return
+    const { error } = await supabase.rpc('set_staff_role', { p_email: em.trim(), p_role: r })
+    if (error) return setErr((error.message || '').replace(/^ROLE:\s*/, ''))
+    setEmail(''); load(); notify && notify(r === 'remove' ? 'Access removed' : 'Role saved')
+  }
+  return <section className="panel teamcard" aria-label="Team">
+    <div className="panel-heading"><div><h3>Team · who can do what</h3><p>Give each person their own sign-in under Authentication → Users in Supabase, then give them a role here. Only owners can change settings.</p></div></div>
+    <form className="rset-body" onSubmit={save}>
+      <div className="rset-row">
+        <label className="rset-field">Email<input type="email" aria-label="Team email" value={email} onChange={e => setEmail(e.target.value)} placeholder="cook@example.com" autoCapitalize="none" /></label>
+        <label className="rset-field">Role<select aria-label="Team role" value={role} onChange={e => setRole(e.target.value)}><option value="cook">Cook</option><option value="delivery">Delivery</option><option value="owner">Owner</option></select></label>
+      </div>
+      <small className="lset-note">{ROLE_TEXT[role]}</small>
+      {err && <p className="lset-warn" role="alert">{err}</p>}
+      <button className="primary app-btn">Save role</button>
+    </form>
+    <ul className="coupon-list team-list">{(team || []).map(m => <li key={m.email} className="team-row"><div><b>{m.email}</b><small>{ROLE_TEXT[m.role] || m.role}</small></div><div className="coupon-act"><button type="button" className="text-btn" onClick={() => save(null, 'remove', m.email)}>Remove</button></div></li>)}{team && !team.length && <li className="coupon-empty">No roles saved yet. Everyone who signs in is an owner until you add the first role.</li>}</ul>
   </section>
 }

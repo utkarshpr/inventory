@@ -21,7 +21,7 @@ function Ico({ n, size = 22 }) {
 // last order reference: one per restaurant (so a restaurant page only ever shows its own order) plus one overall for the home page
 const readSaved = (slug) => { try { return localStorage.getItem(slug ? `last-order-ref:${slug}` : 'last-order-ref') || '' } catch { return '' } }
 const orderAgain = (slug, items) => { try { sessionStorage.setItem('reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/order` }
-const itemText = (items) => (items || []).map(i => /^\d+\s*×/.test(i.name || '') ? i.name : `${i.quantity}× ${i.name}`).join(', ')
+const itemText = (items) => (items || []).map(i => /^\d+\s*×/.test(i.name || '') ? i.name : `${i.quantity}× ${i.name}${i.options ? ` (${i.options})` : ''}`).join(', ')
 const placedText = (iso) => iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) : ''
 const money = (n) => `₹${Number(n).toLocaleString('en-IN')}`
 
@@ -172,14 +172,17 @@ export function TrackOrder({ initialRef, compact, slug }) {
       : <div className="track-result c-result">
           {result.restaurant && <p className="c-rest-chip">{logoFor(result.restaurant_slug) && <img className="c-logo" src={logoFor(result.restaurant_slug)} alt="" width="24" height="24" />}<span>{result.restaurant}</span></p>}
           <div className="c-result-head">{compact ? <span className="c-sub">Order status</span> : <b>{result.order_number}</b>}<span className={result.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{label}</span></div>
-          {result.payment_status === 'pending' && <p className="c-pay-note" role="status"><b>{result.payment_claimed ? 'Payment sent. Waiting for verification.' : 'Waiting for your UPI payment to be confirmed.'}</b> {result.restaurant || 'The kitchen'} starts cooking once the payment is confirmed.</p>}
-          {!compact && result.payment_status === 'pending' && <PayClaim orderRef={result.order_number} claimed={Boolean(result.payment_claimed)} reason={result.payment_reject_reason || ''} onDone={() => lookup(result.order_number, true)} />}
+          {result.delivery_fee_pending && <p className="c-pay-note" role="status"><b>The delivery charge is being added.</b> {result.restaurant || 'The kitchen'} sets it based on your distance. Your total will update here{result.payment_status === 'pending' ? ', then you can pay' : ''}.</p>}
+          {result.payment_status === 'pending' && !result.delivery_fee_pending && <p className="c-pay-note" role="status"><b>{result.payment_claimed ? 'Payment sent. Waiting for verification.' : 'Waiting for your UPI payment to be confirmed.'}</b> {result.restaurant || 'The kitchen'} starts cooking once the payment is confirmed.</p>}
+          {!compact && result.payment_status === 'pending' && !result.delivery_fee_pending && <PayClaim orderRef={result.order_number} claimed={Boolean(result.payment_claimed)} reason={result.payment_reject_reason || ''} onDone={() => lookup(result.order_number, true)} />}
           {result.payment_status === 'received' && <p className="c-pay-ok" role="status">Payment confirmed</p>}
           {result.placed_at && <p className="c-sub">Placed {placedText(result.placed_at)}</p>}
           {result.items && result.items.length > 0 && <p className="c-sub c-items">{itemText(result.items)}</p>}
+          {result.eta_at && <p className="c-sub c-eta">{new Date(result.eta_at) > new Date() ? `Ready around ${new Date(result.eta_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })}` : 'Ready any minute now'}</p>}
           {result.delivery_date && <p className="c-sub c-deliver">Delivery: {deliveryText(result.delivery_date, zonedNow('Asia/Kolkata').date)}</p>}
           <ol className="c-steps">{steps.map(([status, text], i) => <li key={status} style={{ '--i': i }} className={i < current ? 'done' : i === current ? 'now' : ''}>{text}</li>)}</ol>
-          <p className="c-sub">Total {money(result.total)}. This updates by itself.</p>
+          <p className="c-sub">Total {money(result.total)}{Number(result.delivery_fee) > 0 ? ` (includes ${money(result.delivery_fee)} delivery)` : ''}. This updates by itself.</p>
+          {result.status === 'Delivered' && <RatingBox orderRef={result.order_number} rating={result.rating} comment={result.rating_comment} onDone={() => lookup(result.order_number, true)} />}
           {!compact && result.restaurant_slug && <button type="button" className="c-btn c-btn-line c-again-btn" onClick={() => orderAgain(result.restaurant_slug, result.items)}>Order again</button>}
         </div>)}
   </div>
@@ -188,10 +191,14 @@ export function TrackOrder({ initialRef, compact, slug }) {
 /* ---------- Order page for one restaurant ---------- */
 function OrderPage({ r, list }) {
   const [menu, setMenu] = useState(null), [menuError, setMenuError] = useState('')
-  const [qty, setQty] = useState({})
-  const [name, setName] = useState(''), [phone, setPhone] = useState(''), [address, setAddress] = useState(''), [payment, setPayment] = useState(PAYMENTS[0]), [notes, setNotes] = useState('')
+  const [qty, setQty] = useState({})   // key: a dish id, or "dishId|optionId+optionId" for a dish with options
+  const [optionsBy, setOptionsBy] = useState({}), [sheet, setSheet] = useState(null), [avail, setAvail] = useState({})
+  const [saved] = useState(() => { try { return JSON.parse(localStorage.getItem('customer-details') || 'null') || {} } catch { return {} } })
+  const [hasSaved, setHasSaved] = useState(Boolean(saved.phone))
+  const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [payment, setPayment] = useState(PAYMENTS[0]), [notes, setNotes] = useState('')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [placed, setPlaced] = useState(null), [dialog, setDialog] = useState(false)
   const [copied, setCopied] = useState(false), [forcedClosed, setForcedClosed] = useState('')
+  const [feeState, setFeeState] = useState(null)   // { ref, status: 'pending' | 'set', fee, total }: waiting for the kitchen's delivery charge
   const [payState, setPayState] = useState(null)   // { ref, status: 'pending' | 'received' } for a UPI order just placed
   const [couponText, setCouponText] = useState(''), [coupon, setCoupon] = useState(null), [couponMsg, setCouponMsg] = useState(''), [reorderNote, setReorderNote] = useState('')
   const kitchenToday = zonedNow(r.timezone || 'Asia/Kolkata').date
@@ -204,8 +211,15 @@ function OrderPage({ r, list }) {
     if (!isOpen) return
     if (!supabase || !r.id) { setMenu([]); setMenuError('The menu is not available yet.'); return }
     setMenu(null); setMenuError('')
-    supabase.from('recipes').select('id,name,selling_price,category,sold_out_date,image_url').eq('restaurant_id', r.id).eq('is_published', true).order('name').then(({ data, error: err }) => {
-      if (err) { setMenuError(`Could not load the menu: ${err.message}`); setMenu([]) } else setMenu(data || [])
+    supabase.from('recipes').select('id,name,selling_price,category,sold_out_date,image_url,daily_limit,half_plate').eq('restaurant_id', r.id).eq('is_published', true).order('name').then(async ({ data, error: err }) => {
+      if (err) { setMenuError(`Could not load the menu: ${err.message}`); setMenu([]); return }
+      const rows = data || []
+      let by = {}
+      if (rows.length) {
+        const res = await supabase.from('recipe_options').select('id,recipe_id,kind,name,price_delta,sort_order').in('recipe_id', rows.map(x => x.id))
+        ;(res.data || []).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)).forEach(o => { (by[o.recipe_id] ||= []).push(o) })
+      }
+      setOptionsBy(by); setMenu(rows)
     })
   }, [r.id, isOpen])
   useEffect(() => { if (r.is_open) setForcedClosed('') }, [r.is_open])
@@ -225,13 +239,42 @@ function OrderPage({ r, list }) {
   useEffect(() => { if (isOpen) loadDays() }, [r.slug, isOpen, scheduleKey])
 
   const dishes = menu || []
-  const picked = dishes.filter(d => qty[d.id] > 0)
-  const count = picked.reduce((n, d) => n + qty[d.id], 0)
-  const total = picked.reduce((sum, d) => sum + Number(d.selling_price) * qty[d.id], 0)
+  const optsOf = (d) => optionsBy[d.id] || []
+  const halfPrice = (d) => Math.ceil(Number(d.selling_price) / 2) + 50   // half plate = full price / 2 + 50
+  const hasHalf = (d) => Boolean(d.half_plate) && !optsOf(d).some(o => o.kind === 'size')
+  const needsSheet = (d) => optsOf(d).length > 0 || hasHalf(d)
+  const lineInfo = (key) => {
+    const [id, optStr] = key.split('|'), d = dishes.find(x => x.id === id)
+    if (!d) return null
+    const ids = optStr ? optStr.split('+') : [], half = ids.includes('half') && hasHalf(d), chosen = optsOf(d).filter(o => ids.includes(o.id))
+    const names = [...(half ? ['Half plate'] : hasHalf(d) ? ['Full plate'] : []), ...chosen.map(o => o.name)]
+    return { key, dish: d, half, optionIds: chosen.map(o => o.id), label: names.join(', '), unit: (half ? halfPrice(d) : Number(d.selling_price)) + chosen.reduce((s, o) => s + Number(o.price_delta), 0), qty: qty[key] }
+  }
+  const picked = Object.keys(qty).filter(k => qty[k] > 0).map(lineInfo).filter(Boolean)
+  const count = picked.reduce((n, l) => n + l.qty, 0)
+  const total = picked.reduce((sum, l) => sum + l.unit * l.qty, 0)
+  const dishQty = (d) => picked.filter(l => l.dish.id === d.id).reduce((n, l) => n + l.qty, 0)
+  const leftOf = (d) => avail[d.id]   // plates left for the chosen day (undefined = no limit)
+  const canAdd = (d) => leftOf(d) == null || dishQty(d) < leftOf(d)
   const minOrder = Number(r.min_order_value || 0), belowMin = total < minOrder
-  const discount = coupon ? Math.min(coupon.discount, total) : 0, payable = total - discount
+  const discount = coupon ? Math.min(coupon.discount, total) : 0
+  const feeBase = Number(r.delivery_fee || 0), freeAbove = r.free_delivery_above ? Number(r.free_delivery_above) : null
+  const distance = r.charge_mode === 'distance'   // the kitchen adds the delivery charge after the order is placed
+  const fee = picked.length && !distance ? (freeAbove != null && total >= freeAbove ? 0 : feeBase) : 0
+  const payable = total - discount + fee
   const groups = Object.entries(dishes.reduce((acc, d) => { (acc[d.category || 'Menu'] ||= []).push(d); return acc }, {}))
-  const step = (id, delta) => setQty(q => ({ ...q, [id]: Math.max(0, Math.min(50, (q[id] || 0) + delta)) }))
+  const step = (key, delta) => {
+    const d = dishes.find(x => x.id === key.split('|')[0])
+    if (delta > 0 && d && !canAdd(d)) return
+    setQty(q => ({ ...q, [key]: Math.max(0, Math.min(50, (q[key] || 0) + delta)) }))
+  }
+  const addDish = (d) => { if (needsSheet(d)) setSheet(d); else step(d.id, 1) }
+  useEffect(() => {   // plates left per dish for the chosen delivery day
+    if (!isOpen || !deliveryDate || !supabase) return
+    let alive = true
+    supabase.rpc('get_availability', { p_restaurant: r.slug, p_date: deliveryDate }).then(({ data }) => { if (alive) setAvail(data || {}) })
+    return () => { alive = false }
+  }, [r.slug, deliveryDate, isOpen, menu && menu.length])
   useEffect(() => {   // "Order again": fill the cart from a past order, using today's menu and prices
     if (!menu || !menu.length) return
     let saved = null
@@ -240,7 +283,7 @@ function OrderPage({ r, list }) {
     const next = {}, missing = []
     saved.items.forEach(it => {
       const d = menu.find(x => x.name.trim().toLowerCase() === String(it.name || '').trim().toLowerCase())
-      if (d && !soldOut(d)) next[d.id] = Math.min(50, (next[d.id] || 0) + (Number(it.quantity) || 1)); else missing.push(it.name)
+      if (d && !soldOut(d) && !needsSheet(d)) next[d.id] = Math.min(50, (next[d.id] || 0) + (Number(it.quantity) || 1)); else missing.push(it.name)
     })
     setQty(next)
     const added = Object.keys(next).length
@@ -264,6 +307,21 @@ function OrderPage({ r, list }) {
     }, 5000)
     return () => clearInterval(timer)
   }, [payState && payState.ref, payState && payState.status])
+  useEffect(() => {   // the kitchen sets the delivery charge: pick it up within a few seconds
+    if (!feeState || feeState.status !== 'pending' || !supabase) return
+    const timer = setInterval(async () => {
+      const { data } = await supabase.rpc('track_order', { p_order_number: feeState.ref })
+      if (!data) return
+      if (data.status === 'Cancelled') return setFeeState(null)
+      if (!data.delivery_fee_pending) { setPlaced(p => p && ({ ...p, total: Number(data.total), deliveryFee: Number(data.delivery_fee || 0), feePending: false })); setFeeState({ ref: feeState.ref, status: 'set', fee: Number(data.delivery_fee || 0), total: Number(data.total) }) }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [feeState && feeState.ref, feeState && feeState.status])
+  useEffect(() => {
+    if (!feeState || feeState.status !== 'set') return
+    const t = setTimeout(() => setFeeState(null), 6000)
+    return () => clearTimeout(t)
+  }, [feeState && feeState.status])
   const onClaimed = () => setPayState(s => s && ({ ...s, claimed: true, reason: '' }))
   useEffect(() => {   // "Payment confirmed" stays for a moment, then the popup disappears
     if (!payState || payState.status !== 'received') return
@@ -279,19 +337,21 @@ function OrderPage({ r, list }) {
     if (!deliveryDate) return setError('Choose a delivery day.')
     if (!supabase) return setError('Ordering is not available right now. Please contact the kitchen.')
     setSending(true); setError('')
-    const { data, error: err } = await supabase.rpc('place_order', { p_restaurant: r.slug, p_name: name.trim(), p_phone: phone.trim(), p_address: address.trim(), p_payment: payment, p_notes: notes.trim(), p_items: picked.map(d => ({ recipe_id: d.id, quantity: qty[d.id] })), p_coupon: coupon ? coupon.code : null, p_delivery_date: deliveryDate })
+    const { data, error: err } = await supabase.rpc('place_order', { p_restaurant: r.slug, p_name: name.trim(), p_phone: phone.trim(), p_address: address.trim(), p_payment: payment, p_notes: notes.trim(), p_items: picked.map(l => ({ recipe_id: l.dish.id, quantity: l.qty, ...(l.optionIds.length ? { options: l.optionIds } : {}), ...(l.half ? { half: true } : {}) })), p_coupon: coupon ? coupon.code : null, p_delivery_date: deliveryDate })
     setSending(false)
     if (err) {
       if (/INVALID_DELIVERY_DATE/.test(err.message)) { loadDays(); return setError('That delivery day is no longer available. Please choose another day.') }
       if (/RESTAURANT_CLOSED/.test(err.message)) { setForcedClosed(err.message.replace(/^.*RESTAURANT_CLOSED:\s*/, '')); return }
-      const known = /^(INVALID_PHONE|RATE_LIMIT|MIN_ORDER|SOLD_OUT|COUPON):/.test(err.message)
+      const known = /^(INVALID_PHONE|RATE_LIMIT|MIN_ORDER|SOLD_OUT|COUPON|OPTIONS):/.test(err.message)
       return setError(known ? err.message.replace(/^[A-Z_]+:\s*/, '') : `Could not place your order: ${err.message}`)
     }
     const ref = data.order_number
-    setPlaced({ ref, total: Number(data.total), subtotal: Number(data.subtotal || data.total), discount: Number(data.discount || 0), coupon: data.coupon || '', payment, deliveryDate: data.delivery_date, today, items: (data.items || []).filter(i => !String(i.name).startsWith('Note:')) })
+    setPlaced({ ref, total: Number(data.total), subtotal: Number(data.subtotal || data.total), discount: Number(data.discount || 0), deliveryFee: Number(data.delivery_fee || 0), feePending: Boolean(data.delivery_fee_pending), eta: payment !== 'UPI' && r.prep_minutes && data.delivery_date === kitchenToday ? Number(r.prep_minutes) : null, coupon: data.coupon || '', payment, deliveryDate: data.delivery_date, today, items: (data.items || []).filter(i => !String(i.name).startsWith('Note:')) })
     setDialog(true)
     setPayState(payment === 'UPI' ? { ref, status: 'pending', claimed: false, reason: '' } : null)
+    setFeeState(data.delivery_fee_pending ? { ref, status: 'pending' } : null)
     try { localStorage.setItem('last-order-ref', ref); localStorage.setItem(`last-order-ref:${r.slug}`, ref) } catch { /* optional */ }
+    try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim() })); setHasSaved(true) } catch { /* optional */ }
     setQty({}); setNotes(''); setCoupon(null); setCouponText(''); setCouponMsg('')
   }
 
@@ -318,7 +378,7 @@ function OrderPage({ r, list }) {
             <h2 className="c-h2">Order placed</h2>
             <div className="c-ref-row"><code className="c-ref">{placed.ref}</code><button type="button" className="c-btn c-btn-line" onClick={copyRef}>{copied ? 'Copied' : 'Copy'}</button></div>
             <p className="c-sub">Total {money(placed.total)}{placed.discount > 0 ? ` (code ${placed.coupon} saved you ${money(placed.discount)})` : ''}. Keep this number to track your order.</p>
-            <UpiPay r={r} order={placed} show={Boolean(payState && payState.status === 'pending')} claimed={Boolean(payState && payState.claimed)} reason={payState ? payState.reason : ''} onClaimed={onClaimed} />
+            <UpiPay r={r} order={placed} show={Boolean(payState && payState.status === 'pending' && !(feeState && feeState.status === 'pending'))} claimed={Boolean(payState && payState.claimed)} reason={payState ? payState.reason : ''} onClaimed={onClaimed} />
             {placed.deliveryDate && <p className="c-deliver-line">Delivery: {deliveryText(placed.deliveryDate, placed.today)}</p>}
             <WhatsAppLink r={r} className="c-wa" />
             <TrackOrder initialRef={placed.ref} compact />
@@ -334,15 +394,17 @@ function OrderPage({ r, list }) {
             {groups.map(([category, items]) => <section key={category}>
               <h2 className="c-h2 c-cat">{category}</h2>
               <ul className="c-menu">{items.map(d => {
-                const n = qty[d.id] || 0
-                const out = soldOut(d)
-                return <li key={d.id} className={n ? 'c-dish on' : out ? 'c-dish sold' : 'c-dish'}>
+                const hasOpts = needsSheet(d), n = hasOpts ? 0 : (qty[d.id] || 0), left = leftOf(d)
+                const out = soldOut(d) || left === 0
+                const sub = picked.filter(l => l.dish.id === d.id && hasOpts)
+                return <li key={d.id} className={n || sub.length ? 'c-dish on' : out ? 'c-dish sold' : 'c-dish'}>
                   {d.image_url && <img className="c-dish-photo" src={d.image_url} alt="" loading="lazy" width="64" height="64" />}
-                  <div className="c-dish-main"><span className="c-dish-name">{d.name}</span><span className="c-dish-price">{money(d.selling_price)}</span>{out && <span className="c-soldout">Sold out today</span>}</div>
-                  <div className="c-qty">{out ? null : n === 0
-                    ? <button type="button" className="c-add" onClick={() => step(d.id, 1)} aria-label={`Add ${d.name}`}>Add</button>
+                  <div className="c-dish-main"><span className="c-dish-name">{d.name}</span><span className="c-dish-price">{hasHalf(d) ? `Full ${money(d.selling_price)} · Half ${money(halfPrice(d))}` : <>{hasOpts ? 'from ' : ''}{money(d.selling_price)}</>}</span>{soldOut(d) ? <span className="c-soldout">Sold out today</span> : left === 0 ? <span className="c-soldout">Sold out for this day</span> : left != null && left <= 5 ? <span className="c-left">Only {left} left</span> : null}</div>
+                  <div className="c-qty">{out ? null : (n === 0 || hasOpts)
+                    ? <button type="button" className="c-add" onClick={() => addDish(d)} aria-label={`Add ${d.name}`} disabled={!canAdd(d)}>Add</button>
                     : <><button type="button" className="c-step" onClick={() => step(d.id, -1)} aria-label={`Remove one ${d.name}`}><Ico n="minus" size={18} /></button><output key={n} className="c-n c-bump" aria-label={`${d.name} quantity`}>{n}</output><button type="button" className="c-step" onClick={() => step(d.id, 1)} aria-label={`Add one more ${d.name}`}><Ico n="plus" size={18} /></button></>}
                   </div>
+                  {sub.map(l => <div className="c-subline" key={l.key}><span>{l.label || 'Plain'} · {money(l.unit)}</span><div className="c-qty"><button type="button" className="c-step" onClick={() => step(l.key, -1)} aria-label={`Remove one ${d.name} (${l.label})`}><Ico n="minus" size={18} /></button><output className="c-n" aria-label={`${d.name} (${l.label}) quantity`}>{l.qty}</output><button type="button" className="c-step" onClick={() => step(l.key, 1)} aria-label={`Add one more ${d.name} (${l.label})`} disabled={!canAdd(d)}><Ico n="plus" size={18} /></button></div></div>)}
                 </li>
               })}</ul>
             </section>)}
@@ -354,13 +416,22 @@ function OrderPage({ r, list }) {
             {days && days.length > 0 && <div className="c-days" role="radiogroup" aria-label="Delivery day">{days.map(d => { const p = dayParts(d, today); return <label key={d} className={deliveryDate === d ? 'c-day on' : 'c-day'}><input type="radio" name="delivery-day" value={d} checked={deliveryDate === d} onChange={() => setDeliveryDate(d)} /><b>{p.top}</b><span>{p.bottom}</span></label> })}</div>}
 
             <h2 className="c-h2 c-cat">Delivery details</h2>
+            {hasSaved && <p className="c-saved">Filled in from your last order. <button type="button" className="c-linkbtn" onClick={() => { try { localStorage.removeItem('customer-details') } catch { /* ignore */ } setName(''); setPhone(''); setAddress(''); setHasSaved(false) }}>Not you? Clear</button></p>}
             <label className="c-field"><span>Name</span><input className="c-input" required autoComplete="name" value={name} onChange={e => setName(e.target.value)} /></label>
             <label className="c-field"><span>Phone number <small>10-digit mobile</small></span><input className="c-input" required maxLength={16} type="tel" inputMode="tel" autoComplete="tel" pattern="[0-9+ \-]{7,20}" title="Enter a valid phone number" value={phone} onChange={e => setPhone(e.target.value)} /></label>
             <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="House or flat, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
             <fieldset className="c-field c-pay"><legend>Payment</legend>
               <div className="c-chips">{PAYMENTS.map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
-              {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">After you place the order you'll see a QR code and the UPI ID to pay.</p>}
+              {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">{distance ? "After the kitchen adds the delivery charge you'll see a QR code and the UPI ID to pay." : "After you place the order you'll see a QR code and the UPI ID to pay."}</p>}
             </fieldset>
+            {picked.length > 0 && <div className="c-summary" aria-label="Order summary">
+              <div><span>Items</span><b>{money(total)}</b></div>
+              {discount > 0 && <div><span>Coupon</span><b>−{money(discount)}</b></div>}
+              {distance ? <div><span>Delivery</span><b>Set by the kitchen</b></div> : feeBase > 0 && <div><span>Delivery</span><b>{fee ? money(fee) : 'Free'}</b></div>}
+              <div className="c-summary-total"><span>To pay</span><b>{money(payable)}</b></div>
+              {!distance && feeBase > 0 && freeAbove != null && fee > 0 && <small>Add {money(freeAbove - total)} more for free delivery.</small>}
+              {distance && <small>The kitchen adds a delivery charge based on your distance. You will see it on your order{payment === 'UPI' ? ', and pay then' : ''}.</small>}
+            </div>}
             <div className="c-field c-coupon"><span>Coupon code <small>optional</small></span>
               <div className="c-coupon-row"><input className="c-input" aria-label="Coupon code" value={couponText} onChange={e => { setCouponText(e.target.value.toUpperCase()); if (coupon) { setCoupon(null); setCouponMsg('') } }} autoCapitalize="characters" autoCorrect="off" spellCheck="false" maxLength={20} placeholder="e.g. WELCOME50" />
                 <button type="button" className="c-btn c-btn-line" disabled={!couponText.trim() || !total} onClick={() => checkCoupon(couponText.trim(), total)}>Apply</button></div>
@@ -371,18 +442,24 @@ function OrderPage({ r, list }) {
           </form>
         </div>}
 
+    {sheet && <OptionSheet dish={sheet} options={optsOf(sheet)} halfPrice={hasHalf(sheet) ? halfPrice(sheet) : null} onClose={() => setSheet(null)} onAdd={(ids) => { step(`${sheet.id}|${ids.slice().sort().join('+')}`, 1); setSheet(null) }} />}
     {isOpen && count > 0 && <div className="c-cart">
       <div className="c-cart-sum"><b>{count} item{count === 1 ? '' : 's'}</b><span key={payable} className="c-bump">{discount > 0 && <s className="c-was">{money(total)}</s>} {money(payable)}</span></div>
       <button form="order-form" className="c-cta c-cta-accent customer-submit" disabled={sending || !deliveryDate || belowMin}>{belowMin ? `Add ${money(minOrder - total)} more` : sending ? 'Placing order…' : 'Place order'}</button>
     </div>}
 
-    {payState && !dialog && <div className={payState.status === 'pending' ? 'c-paypop' : 'c-paypop ok'} role="status" aria-live="polite">
+    {feeState && !dialog && <div className={feeState.status === 'pending' ? 'c-paypop' : 'c-paypop ok'} role="status" aria-live="polite">
+      {feeState.status === 'pending'
+        ? <><span className="c-paypop-dot" aria-hidden="true" /><div><b>Adding your delivery charge</b><small>{feeState.ref} · {r.name} sets it based on your distance. You will see it here.</small></div></>
+        : <><span className="c-paypop-tick" aria-hidden="true">✓</span><div><b>{feeState.fee > 0 ? `Delivery charge added: ${money(feeState.fee)}` : 'Delivery is free for you'}</b><small>{feeState.ref} · New total {money(feeState.total)}{payState && payState.status === 'pending' ? '. You can pay now.' : ''}</small></div></>}
+    </div>}
+    {payState && !dialog && !feeState && <div className={payState.status === 'pending' ? 'c-paypop' : 'c-paypop ok'} role="status" aria-live="polite">
       {payState.status === 'pending'
         ? <><span className="c-paypop-dot" aria-hidden="true" /><div><b>{payState.claimed ? 'Payment sent. Waiting for verification' : payState.reason ? 'Payment not verified' : 'Payment confirmation pending'}</b><small>{payState.ref} · {payState.claimed ? `${r.name} is checking your payment and will start cooking once it is verified.` : payState.reason ? `${payState.reason}. Pay again or send the correct transaction ID.` : `Pay, then tap "I've paid". ${r.name} starts cooking once it confirms your UPI payment.`}</small></div></>
         : <><span className="c-paypop-tick" aria-hidden="true">✓</span><div><b>Payment confirmed</b><small>{payState.ref} · The kitchen is getting started.</small></div></>}
     </div>}
 
-    {dialog && placed && <OrderDialog payStatus={payState && payState.status} payClaimed={Boolean(payState && payState.claimed)} payReason={payState ? payState.reason : ''} onClaimed={onClaimed} r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
+    {dialog && placed && <OrderDialog feePending={Boolean(feeState && feeState.status === 'pending')} payStatus={payState && payState.status} payClaimed={Boolean(payState && payState.claimed)} payReason={payState ? payState.reason : ''} onClaimed={onClaimed} r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
   </div>
 }
 
@@ -404,6 +481,47 @@ const upiLink = (r, order) => {
   // A personal UPI ID cannot take a pre-filled amount in most apps ("request type not supported"), so leave it out.
   return r.upi_personal ? `upi://pay?pa=${r.upi_id}&pn=${name}&cu=INR` : `upi://pay?pa=${r.upi_id}&pn=${name}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${note}`
 }
+/* Choose a size and extras for a dish, then add it to the order. */
+function OptionSheet({ dish, options, halfPrice, onClose, onAdd }) {
+  const realSizes = options.filter(o => o.kind === 'size'), extras = options.filter(o => o.kind === 'extra')
+  const sizes = realSizes.length ? realSizes : halfPrice != null ? [{ id: 'full', name: 'Full plate', price_delta: 0, shown: Number(dish.selling_price) }, { id: 'half', name: 'Half plate', price_delta: 0, shown: halfPrice }] : []
+  const [size, setSize] = useState(sizes[0] ? sizes[0].id : ''), [picked, setPicked] = useState([])
+  const base = size === 'half' ? halfPrice : Number(dish.selling_price)
+  const unit = base + [...(realSizes.length && size ? [size] : []), ...picked].reduce((s, id) => s + Number((options.find(o => o.id === id) || {}).price_delta || 0), 0)
+  useEffect(() => { const k = (e) => { if (e.key === 'Escape') onClose() }; document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k) }, [])
+  const ids = () => [...(realSizes.length ? (size ? [size] : []) : size === 'half' ? ['half'] : []), ...picked]
+  return <div className="c-sheet-wrap" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="c-sheet" role="dialog" aria-modal="true" aria-label={`Choose options for ${dish.name}`}>
+      <h2 className="c-h2">{dish.name}</h2>
+      {sizes.length > 0 && <fieldset className="c-opt-group"><legend>Choose a size</legend>{sizes.map(o => <label key={o.id} className={size === o.id ? 'c-opt on' : 'c-opt'}><input type="radio" name="size" checked={size === o.id} onChange={() => setSize(o.id)} /><span>{o.name}</span><b>{o.shown != null ? money(o.shown) : Number(o.price_delta) > 0 ? `+${money(o.price_delta)}` : 'Included'}</b></label>)}</fieldset>}
+      {extras.length > 0 && <fieldset className="c-opt-group"><legend>Extras <small>optional</small></legend>{extras.map(o => <label key={o.id} className={picked.includes(o.id) ? 'c-opt on' : 'c-opt'}><input type="checkbox" checked={picked.includes(o.id)} onChange={() => setPicked(p => p.includes(o.id) ? p.filter(x => x !== o.id) : [...p, o.id])} /><span>{o.name}</span><b>+{money(o.price_delta)}</b></label>)}</fieldset>}
+      <div className="c-sheet-foot"><button type="button" className="c-btn c-btn-line" onClick={onClose}>Cancel</button><button type="button" className="c-cta c-cta-accent c-sheet-add" disabled={sizes.length > 0 && !size} onClick={() => onAdd(ids())}>Add · {money(unit)}</button></div>
+    </div>
+  </div>
+}
+
+/* After delivery: 1 to 5 stars and an optional comment. */
+function RatingBox({ orderRef, rating, comment, onDone }) {
+  const [stars, setStars] = useState(0), [text, setText] = useState(''), [busy, setBusy] = useState(false), [err, setErr] = useState('')
+  if (rating) return <p className="c-rated" role="status">Thanks for rating <span className="c-rated-stars" aria-label={`${rating} stars`}>{'★'.repeat(rating)}{'☆'.repeat(5 - rating)}</span>{comment ? ` · “${comment}”` : ''}</p>
+  const send = async (e) => {
+    e.preventDefault()
+    if (!stars || busy || !supabase) return
+    setBusy(true); setErr('')
+    const { error } = await supabase.rpc('rate_order', { p_order_number: orderRef, p_rating: stars, p_comment: text.trim() || null })
+    setBusy(false)
+    if (error) return setErr((error.message || '').replace(/^RATING:\s*/, '') || 'Could not send your rating.')
+    onDone && onDone()
+  }
+  return <form className="c-rate" onSubmit={send}>
+    <p className="c-rate-q"><b>How was your order?</b></p>
+    <div className="c-stars" role="radiogroup" aria-label="Rating">{[1, 2, 3, 4, 5].map(n => <button type="button" key={n} role="radio" aria-checked={stars === n} aria-label={`${n} star${n > 1 ? 's' : ''}`} className={n <= stars ? 'on' : ''} onClick={() => setStars(n)}>★</button>)}</div>
+    <textarea className="c-input" rows={2} maxLength={300} value={text} onChange={e => setText(e.target.value)} placeholder="Tell us more (optional)" aria-label="Rating comment" />
+    {err && <p className="c-note c-note-bad" role="alert">{err}</p>}
+    <button className="c-btn c-btn-ink" disabled={!stars || busy}>{busy ? 'Sending…' : 'Send rating'}</button>
+  </form>
+}
+
 /* "I've paid": the customer can add the UPI transaction ID (optional) and wait while the kitchen verifies the payment. */
 function PayClaim({ orderRef, claimed, reason, onDone }) {
   const [txn, setTxn] = useState(''), [busy, setBusy] = useState(false), [err, setErr] = useState('')
@@ -441,7 +559,7 @@ function UpiPay({ r, order, show, claimed, reason, onClaimed }) {
 }
 
 /* The centred "order received" confirmation, in the restaurant's own colours */
-function OrderDialog({ r, order, copied, onCopy, onClose, payStatus, payClaimed, payReason, onClaimed }) {
+function OrderDialog({ r, order, copied, onCopy, onClose, payStatus, payClaimed, payReason, onClaimed, feePending }) {
   const done = useRef(null)
   useEffect(() => {
     done.current && done.current.focus()
@@ -459,11 +577,13 @@ function OrderDialog({ r, order, copied, onCopy, onClose, payStatus, payClaimed,
       {order.payment === 'UPI' && payStatus === 'received' && <p className="c-dlg-paywait ok" role="status">Payment confirmed ✓</p>}
       <p className="c-dlg-line">Your reference is</p>
       <div className="c-dlg-ref"><code>{order.ref}</code><button type="button" className="c-btn c-btn-ink" onClick={onCopy}>{copied ? 'Copied' : 'Copy'}</button></div>
-      <p className="c-dlg-total">Total: {money(order.total)}</p>
+      <p className="c-dlg-total">Total: {money(order.total)}{feePending ? ' + delivery' : ''}</p>
+      {order.eta && <p className="c-dlg-deliver">Ready in about {order.eta} minutes</p>}
       {order.discount > 0 && <p className="c-dlg-deliver">Code {order.coupon}: you saved {money(order.discount)}</p>}
       {order.deliveryDate && <p className="c-dlg-deliver">Delivery: {deliveryText(order.deliveryDate, order.today)}</p>}
-      {order.items.length > 0 && <ul className="c-dlg-items" aria-label="Your order">{order.items.map((i, k) => <li key={k}><span>{i.quantity} × {i.name}</span><span>{money(i.price * i.quantity)}</span></li>)}</ul>}
-      <UpiPay r={r} order={order} show={payStatus === 'pending'} claimed={payClaimed} reason={payReason} onClaimed={onClaimed} />
+      {order.items.length > 0 && <ul className="c-dlg-items" aria-label="Your order">{order.items.map((i, k) => <li key={k}><span>{i.quantity} × {i.name}{i.options ? ` (${i.options})` : ''}</span><span>{money(i.price * i.quantity)}</span></li>)}{order.deliveryFee > 0 && <li><span>Delivery</span><span>{money(order.deliveryFee)}</span></li>}</ul>}
+      {feePending && <p className="c-dlg-paywait" role="status">The kitchen is adding your delivery charge</p>}
+      <UpiPay r={r} order={order} show={payStatus === 'pending' && !feePending} claimed={payClaimed} reason={payReason} onClaimed={onClaimed} />
       <WhatsAppLink r={r} className="c-wa c-wa-dlg" />
       <p className="c-dlg-hint">Keep this number to track your order.</p>
       <button ref={done} type="button" className="c-cta c-cta-hero" onClick={onClose}>Done</button>

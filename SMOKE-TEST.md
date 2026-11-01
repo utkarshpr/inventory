@@ -75,3 +75,16 @@ Leave the dashboard open. The strip shows **Live**, **Sound on**, **Screen stays
 - After paying, on the customer's phone type a transaction ID (optional) and tap "I've paid". On the dashboard (even on the other restaurant) a Verify payment popup should appear with a sound and the transaction ID. Accept it and confirm the customer's popup changes to Payment confirmed. Repeat and Reject with a reason: the customer should see the reason and be able to pay again.
 - Orders: the tabs New / Cooking / Ready / Delivered / Cancelled show the right orders and counts; move an order to Cooking and watch the counts change.
 - Payments: the page lists customers with Paid / Not paid / To verify. Accept a UPI payment from here, and press Mark received on a delivered cash order.
+
+## 11. Delivery, plates, options, ratings, roles
+
+1. Settings → Delivery charge → *By distance*. Place a delivery order as a customer: the order page says the kitchen will set the charge. As staff tap **Set delivery charge** → ₹40. The customer page now shows the new total. For UPI, "I've paid" works only after this.
+2. Switch to *Fixed* ₹30, free above ₹500: a ₹200 order shows ₹30, a ₹600 order shows free delivery.
+3. Recipes → *Plates per day* = 2 on a dish. Order 2, then try a 3rd for the same day: "Sold out for that day". Cancel one order: a plate is available again.
+4. Recipes → enable **Half plate** on a ₹200 dish: customer sees Half ₹150. Add a size or extra option and check the price changes.
+5. Orders → Delivery sheet: orders show address, phone and cash to collect. Print opens.
+6. Mark an order Delivered; on the customer's tracking page give 4 stars. Reports → Customer ratings shows it. Rate another 1 star: an alert arrives.
+7. Place an order, reopen the order form: your details are filled in. Tap Order again on a past order.
+8. Payments → filter *Not paid* / *Waiting for check* / *Paid*; WhatsApp reminder opens a message.
+9. More → Customers lists customers with orders and spend.
+10. Settings → Team: add a cook, sign in as them: they see only Orders and To cook.

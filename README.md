@@ -137,3 +137,19 @@ The ntfy topic in Settings keeps working as a separate backup.
 - **I've paid + transaction ID:** after paying, the customer taps "I've paid" and can add the UPI transaction ID (optional). The admin gets a **Verify payment** popup with a sound (for either restaurant, and as a phone notification) showing the order, amount and transaction ID, with **Accept payment** and **Reject**. Reject asks for a reason; the customer sees it and can pay again or send the right ID. Staff can also open the order and use Verify payment / Confirm payment themselves. A customer can send "I've paid" up to 5 times per order.
 - **Payments page:** who has paid and who has not, for the restaurant you are managing. Tiles show the money paid, not paid and waiting to be verified. Tabs: All / Not paid / To verify / Paid, with search by name or order number and a date filter. Each row shows the customer name, order number, amount, method, status and the UPI transaction ID if sent. UPI rows have Confirm payment / Verify payment; cash rows have **Mark received** (and Undo), so you can see which cash orders were delivered but not collected. Cancelled orders are not listed.
 - **Orders page tabs:** All orders, New, Cooking, Ready, Delivered and Cancelled, each with a live count.
+
+## Delivery, plates, options and ratings
+
+- **Delivery charge.** Settings → Delivery charge: *Fixed* (a fee per order, optional "free above ₹X") or *By distance*. With By distance the customer sees "Set by the kitchen"; on the order card tap **Set delivery charge** (quick chips or any amount up to ₹5000). The customer sees the new total on their order page and can then pay it. UPI "I've paid" waits until the charge is set.
+- **Plates per day.** Recipes → *Plates per day* limits one dish for a delivery day. Customers see "Only N left" and "Sold out for that day"; cancelled orders free their plates.
+- **Dish options.** Recipes → add sizes (customer must pick one) or extras (optional, add to the price). **Half plate** can be enabled per dish; price = full ÷ 2 + ₹50 (rounded up).
+- **Delivery sheet.** Orders → Delivery sheet lists orders by day with address, phone, items and cash to collect; Print works.
+- **Remember me.** Customers' name, phone and address are kept on their phone for the next order. Order again repeats a past order.
+- **Ratings.** After delivery the customer can give 1–5 stars and a comment. Reports shows averages and comments; a 1–2 star rating raises an alert.
+- **ETA.** Settings → Prep minutes shows "Ready in about N min" once cooking starts.
+- **Unpaid UPI.** Payments → WhatsApp reminder; Settings → *Auto-cancel unpaid UPI* cancels after N minutes (needs pg_cron).
+- **Customers** page (under More): orders, spend, last order and WhatsApp per customer.
+- **Team roles.** Settings → Team: *owner* (everything), *cook* (Orders, To cook), *delivery* (Orders, Payments). Create the user in Supabase → Authentication first, then add their email here. Until the first role is added, every signed-in user is an owner.
+- **Payments** page has status filters: All / Not paid / Waiting for check / Paid.
+
+After updating: run `supabase/schema.sql` (safe to run twice), enable `pg_cron` under Database → Extensions and run it again, then redeploy `send-push` with Verify JWT off.

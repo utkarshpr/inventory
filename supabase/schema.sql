@@ -139,6 +139,12 @@ exception when duplicate_object then null; end $$;
 alter table public.orders add column if not exists delivery_date date;
 alter table public.orders add column if not exists cancel_reason text;
 alter table public.orders add column if not exists coupon_code text;
+alter table public.orders add column if not exists delivery_fee numeric not null default 0;
+alter table public.orders add column if not exists delivery_fee_pending boolean not null default false;   -- waiting for the kitchen to set the delivery charge
+alter table public.orders add column if not exists rating smallint check (rating between 1 and 5);
+alter table public.orders add column if not exists rating_comment text;
+alter table public.orders add column if not exists rated_at timestamptz;
+alter table public.orders add column if not exists cooking_at timestamptz;
 alter table public.orders add column if not exists payment_status text not null default 'not_required' check (payment_status in ('not_required', 'pending', 'received'));   -- UPI orders wait for staff to confirm the payment
 alter table public.orders add column if not exists payment_confirmed_at timestamptz;
 alter table public.orders add column if not exists payment_txn_id text;            -- the UPI transaction ID the customer sent (optional)
@@ -149,6 +155,13 @@ alter table public.orders add column if not exists discount numeric not null def
 alter table public.recipes add column if not exists sold_out_date date;   -- sold out for that day only; clears itself the next day
 alter table public.recipes add column if not exists image_url text;
 alter table public.restaurants add column if not exists upi_id text;
+alter table public.restaurants add column if not exists delivery_fee numeric not null default 0 check (delivery_fee >= 0);
+alter table public.restaurants add column if not exists free_delivery_above numeric check (free_delivery_above is null or free_delivery_above > 0);   -- free delivery from this order value
+alter table public.restaurants add column if not exists prep_minutes int default 40 check (prep_minutes is null or prep_minutes between 5 and 480);       -- usual preparation time, shown to customers
+alter table public.restaurants add column if not exists unpaid_cancel_minutes int check (unpaid_cancel_minutes is null or unpaid_cancel_minutes between 5 and 1440);   -- cancel UPI orders nobody paid for
+alter table public.recipes add column if not exists daily_limit int check (daily_limit is null or daily_limit >= 0);   -- plates per delivery day
+alter table public.recipes add column if not exists half_plate boolean not null default false;   -- offer a half plate: full price / 2 + 50
+alter table public.restaurants add column if not exists charge_mode text not null default 'fixed' check (charge_mode in ('fixed', 'distance'));   -- distance: the kitchen sets the delivery charge on each order
 alter table public.restaurants add column if not exists upi_personal boolean not null default false;   -- personal UPI IDs: UPI apps refuse a pre-filled amount, so the link leaves it out
 alter table public.restaurants add column if not exists low_stock_alerts boolean not null default true;   -- Settings: alert when an ingredient runs low
 update public.orders set delivery_date = (created_at at time zone 'Asia/Kolkata')::date where delivery_date is null;   -- older orders: delivered on the day they were placed
@@ -383,7 +396,8 @@ declare
   rest record; it jsonb; rc record; qty int;
   v_phone text; v_ip text; v_hash text; n int;
   v_ph int; v_pd int; v_ch int;
-  total numeric := 0; v_disc numeric := 0; v_code text; subtotal numeric;
+  total numeric := 0; v_disc numeric := 0; v_code text; subtotal numeric; v_fee numeric := 0; v_pending boolean := false;
+  taken jsonb := '{}'::jsonb; plates_used int; opt record; opt_ids jsonb; opts_price numeric; opts_text text; size_n int; has_size boolean; unit numeric;
   lines jsonb := '[]'::jsonb;
   num text; tries int := 0;
 begin
@@ -435,16 +449,50 @@ begin
   for it in select * from jsonb_array_elements(p_items) loop
     begin qty := (it->>'quantity')::int; exception when others then qty := 0; end;
     if qty < 1 or qty > 50 then raise exception 'Invalid quantity'; end if;
-    select id, name, selling_price, sold_out_date into rc
+    select id, name, selling_price, sold_out_date, daily_limit, half_plate into rc
       from public.recipes
       where id::text = it->>'recipe_id' and is_published = true and restaurant_id = rest.id;
     if not found then raise exception 'An item is no longer on the menu'; end if;
     if rc.sold_out_date is not null and rc.sold_out_date = (now() at time zone coalesce(rest.timezone, 'Asia/Kolkata'))::date then
       raise exception 'SOLD_OUT: % is sold out today', rc.name;
     end if;
-    total := total + rc.selling_price * qty;
-    lines := lines || jsonb_build_array(
-      jsonb_build_object('name', rc.name, 'quantity', qty, 'price', rc.selling_price));
+    -- Options (size, extras): prices come from the database. A dish with sizes needs exactly one size.
+    opts_price := 0; opts_text := ''; size_n := 0;
+    opt_ids := case when jsonb_typeof(it->'options') = 'array' then it->'options' else '[]'::jsonb end;
+    if jsonb_array_length(opt_ids) > 10 then raise exception 'Too many options'; end if;
+    if (select count(*) from jsonb_array_elements_text(opt_ids)) <> (select count(*) from public.recipe_options o where o.recipe_id = rc.id and o.id::text in (select jsonb_array_elements_text(opt_ids))) then
+      raise exception 'An option is no longer available';
+    end if;
+    for opt in select o.kind, o.name, o.price_delta from public.recipe_options o where o.recipe_id = rc.id and o.id::text in (select jsonb_array_elements_text(opt_ids)) order by o.sort_order, o.name loop
+      opts_price := opts_price + opt.price_delta;
+      opts_text := opts_text || case when opts_text = '' then '' else ', ' end || opt.name;
+      if opt.kind = 'size' then size_n := size_n + 1; end if;
+    end loop;
+    select exists (select 1 from public.recipe_options o where o.recipe_id = rc.id and o.kind = 'size') into has_size;
+    if size_n > 1 or (has_size and size_n = 0) then raise exception 'OPTIONS: Choose a size for %', rc.name; end if;
+    -- Plates per delivery day
+    if rc.daily_limit is not null then
+      perform pg_advisory_xact_lock(hashtext(rc.id::text));
+      taken := taken || jsonb_build_object(rc.id::text, coalesce((taken->>rc.id::text)::int, 0) + qty);
+      select coalesce(sum((i->>'quantity')::int), 0) into plates_used
+        from public.orders o, jsonb_array_elements(case when jsonb_typeof(o.items) = 'array' then o.items else '[]'::jsonb end) i
+       where o.restaurant_id = rest.id and o.delivery_date = p_delivery_date and o.status <> 'Cancelled'
+         and jsonb_typeof(i) = 'object' and lower(i->>'name') = lower(rc.name);
+      if plates_used + (taken->>rc.id::text)::int > rc.daily_limit then
+        if rc.daily_limit - plates_used > 0 then raise exception 'SOLD_OUT: Only % of % left for that day', rc.daily_limit - plates_used, rc.name;
+        else raise exception 'SOLD_OUT: % is sold out for that day', rc.name; end if;
+      end if;
+    end if;
+    unit := rc.selling_price + opts_price;
+    if coalesce((it->>'half')::boolean, false) then   -- half plate: full price / 2 + 50, half the ingredients
+      if not rc.half_plate or has_size then raise exception 'OPTIONS: A half plate is not available for %', rc.name; end if;
+      unit := ceil(rc.selling_price / 2.0) + 50 + opts_price;
+      opts_text := 'Half plate' || case when opts_text = '' then '' else ', ' || opts_text end;
+    end if;
+    total := total + unit * qty;
+    lines := lines || jsonb_build_array(jsonb_strip_nulls(
+      jsonb_build_object('name', rc.name, 'quantity', qty, 'price', unit, 'options', nullif(opts_text, ''),
+                         'portion', case when coalesce((it->>'half')::boolean, false) then 0.5 end)));
   end loop;
 
   if total < rest.min_order_value then
@@ -459,6 +507,9 @@ begin
     if not found then raise exception 'COUPON: This code is not valid'; end if;
     total := total - v_disc;
   end if;
+  v_pending := rest.charge_mode = 'distance';   -- the kitchen sets the charge after the order is placed
+  v_fee := case when v_pending then 0 when rest.free_delivery_above is not null and subtotal >= rest.free_delivery_above then 0 else coalesce(rest.delivery_fee, 0) end;
+  total := total + v_fee;
 
   if coalesce(trim(p_notes), '') <> '' then
     lines := lines || jsonb_build_array(
@@ -468,9 +519,9 @@ begin
   loop
     num := rest.order_prefix || '-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
     begin
-      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method, coupon_code, discount, payment_status)
+      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method, coupon_code, discount, payment_status, delivery_fee, delivery_fee_pending)
       values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment, v_code, v_disc,
-              case when p_payment = 'UPI' then 'pending' else 'not_required' end);
+              case when p_payment = 'UPI' then 'pending' else 'not_required' end, v_fee, v_pending);
       exit;
     exception when unique_violation then
       tries := tries + 1;
@@ -478,7 +529,7 @@ begin
     end;
   end loop;
 
-  return jsonb_build_object('order_number', num, 'total', total, 'subtotal', subtotal, 'discount', v_disc, 'coupon', v_code, 'restaurant', rest.name, 'items', lines, 'delivery_date', p_delivery_date);
+  return jsonb_build_object('order_number', num, 'total', total, 'subtotal', subtotal, 'discount', v_disc, 'delivery_fee', v_fee, 'delivery_fee_pending', v_pending, 'coupon', v_code, 'restaurant', rest.name, 'items', lines, 'delivery_date', p_delivery_date);
 end $$;
 revoke all on function public.place_order(text, text, text, text, text, text, jsonb, date, text) from public;
 grant execute on function public.place_order(text, text, text, text, text, text, jsonb, date, text) to anon, authenticated;
@@ -515,7 +566,7 @@ grant execute on function public.place_order(text, text, text, text, text, jsonb
 create or replace function public.public_items(p jsonb) returns jsonb
 language sql immutable set search_path = public as $$
   select coalesce(jsonb_agg(case when jsonb_typeof(i) = 'object'
-      then jsonb_build_object('name', i->>'name', 'quantity', coalesce(i->'quantity', '1'::jsonb))
+      then jsonb_strip_nulls(jsonb_build_object('name', i->>'name', 'quantity', coalesce(i->'quantity', '1'::jsonb), 'options', i->'options'))
       else jsonb_build_object('name', i #>> '{}', 'quantity', 1) end), '[]'::jsonb)
   from jsonb_array_elements(case when jsonb_typeof(p) = 'array' then p else '[]'::jsonb end) i
 $$;
@@ -524,6 +575,10 @@ create or replace function public.track_order(p_order_number text)
 returns jsonb
 language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
+    'rating', o.rating, 'rating_comment', o.rating_comment, 'delivery_fee', o.delivery_fee, 'delivery_fee_pending', o.delivery_fee_pending,
+    'eta_at', case when o.status in ('New', 'Cooking') and r.prep_minutes is not null and o.payment_status <> 'pending'
+                    and o.delivery_date = (now() at time zone coalesce(r.timezone, 'Asia/Kolkata'))::date
+                   then coalesce(o.cooking_at, o.payment_confirmed_at, o.created_at) + make_interval(mins => r.prep_minutes) end,
     'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
     'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
   from public.orders o join public.restaurants r on r.id = o.restaurant_id
@@ -539,7 +594,7 @@ begin
   if length(v_phone) <> 10 or v_phone !~ '^[6-9]' then raise exception 'INVALID_PHONE: Enter a valid 10-digit mobile number'; end if;
   select count(*) into v_total from public.orders where customer_phone = v_phone;
   select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
-    select jsonb_build_object('order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
+    select jsonb_build_object('rating', o.rating, 'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
       'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
     from public.orders o join public.restaurants r on r.id = o.restaurant_id
     where o.customer_phone = v_phone order by o.created_at desc limit v_lim offset v_off) s;
@@ -566,6 +621,7 @@ begin
       if jsonb_typeof(it) <> 'object' then continue; end if;
       q := case when (it->>'quantity') ~ '^[0-9]+(\.[0-9]+)?$' then (it->>'quantity')::numeric else 0 end;
       if q <= 0 then continue; end if;
+      q := q * case when (it->>'portion') ~ '^[0-9]+(\.[0-9]+)?$' then (it->>'portion')::numeric else 1 end;   -- a half plate uses half the ingredients
       for r in
         select ri.inventory_item_id, ri.quantity
         from public.recipes rc
@@ -863,6 +919,7 @@ begin
   if o.payment_method is distinct from 'UPI' or o.payment_status <> 'pending' or o.status = 'Cancelled' then
     raise exception 'PAYMENT: This order is not waiting for a UPI payment';
   end if;
+  if o.delivery_fee_pending then raise exception 'PAYMENT: Wait for the kitchen to add the delivery charge, then pay the new total'; end if;
   if t is not null and t !~ '^[A-Za-z0-9]{6,40}$' then
     raise exception 'PAYMENT: The transaction ID should be 6 to 40 letters or numbers, with no spaces';
   end if;
@@ -894,3 +951,221 @@ revoke all on function public.alert_payment_claim() from public, anon, authentic
 drop trigger if exists orders_alert_payment_claim on public.orders;
 create trigger orders_alert_payment_claim after update of payment_claimed_at on public.orders
   for each row execute function public.alert_payment_claim();
+
+-- ============================================================
+-- 11. Dish options, plate limits, ratings, auto-cancel, ETA, customers, staff roles
+-- ============================================================
+-- Options for a dish: a size (exactly one when the dish has sizes) and extras. The price is added to the dish price.
+create table if not exists public.recipe_options (
+  id uuid primary key default gen_random_uuid(),
+  recipe_id uuid not null references public.recipes(id) on delete cascade,
+  kind text not null check (kind in ('size', 'extra')),
+  name text not null check (length(trim(name)) between 1 and 40),
+  price_delta numeric not null default 0 check (price_delta >= 0),
+  sort_order int not null default 0
+);
+create index if not exists recipe_options_recipe_idx on public.recipe_options (recipe_id);
+alter table public.recipe_options enable row level security;
+drop policy if exists "Staff can manage recipe options" on public.recipe_options;
+create policy "Staff can manage recipe options" on public.recipe_options for all to authenticated using (true) with check (true);
+drop policy if exists "Customers can view options" on public.recipe_options;
+create policy "Customers can view options" on public.recipe_options for select to anon using (
+  exists (select 1 from public.recipes r join public.restaurants s on s.id = r.restaurant_id
+           where r.id = recipe_options.recipe_id and r.is_published and s.is_open));
+
+-- How many plates are left per dish for a delivery day (only dishes with a daily limit appear).
+create or replace function public.get_availability(p_restaurant text, p_date date)
+returns jsonb
+language sql stable security definer set search_path = public as $$
+  select coalesce(jsonb_object_agg(rc.id::text, greatest(rc.daily_limit - coalesce(u.used, 0), 0)), '{}'::jsonb)
+  from public.recipes rc
+  join public.restaurants rs on rs.id = rc.restaurant_id and rs.slug = p_restaurant
+  left join lateral (
+    select sum((i->>'quantity')::int) as used
+      from public.orders o, jsonb_array_elements(case when jsonb_typeof(o.items) = 'array' then o.items else '[]'::jsonb end) i
+     where o.restaurant_id = rc.restaurant_id and o.delivery_date = p_date and o.status <> 'Cancelled'
+       and jsonb_typeof(i) = 'object' and lower(i->>'name') = lower(rc.name)) u on true
+  where rc.is_published and rc.daily_limit is not null
+$$;
+revoke all on function public.get_availability(text, date) from public;
+grant execute on function public.get_availability(text, date) to anon, authenticated;
+
+-- Customers rate a delivered order once (1 to 5 stars, optional comment).
+create or replace function public.rate_order(p_order_number text, p_rating int, p_comment text default null)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare o record;
+begin
+  select * into o from public.orders where order_number = upper(trim(coalesce(p_order_number, '')));
+  if not found then raise exception 'RATING: We could not find that order'; end if;
+  if o.status <> 'Delivered' then raise exception 'RATING: You can rate an order once it is delivered'; end if;
+  if o.rating is not null then raise exception 'RATING: This order is already rated'; end if;
+  if p_rating is null or p_rating < 1 or p_rating > 5 then raise exception 'RATING: Choose 1 to 5 stars'; end if;
+  update public.orders set rating = p_rating, rating_comment = nullif(left(trim(coalesce(p_comment, '')), 300), ''), rated_at = now() where id = o.id;
+  return jsonb_build_object('rated', true);
+end $$;
+revoke all on function public.rate_order(text, int, text) from public;
+grant execute on function public.rate_order(text, int, text) to anon, authenticated;
+
+create or replace function public.alert_low_rating()
+returns trigger
+language plpgsql security definer set search_path = public as $$
+declare rname text;
+begin
+  if new.rating is not null and new.rating <= 2 and new.rating is distinct from old.rating then
+    select name into rname from public.restaurants where id = new.restaurant_id;
+    perform public.send_alert(new.restaurant_id, 'Low rating · ' || coalesce(rname, 'Kitchen'),
+      new.order_number || ' · ' || new.rating || ' star' || case when new.rating = 1 then '' else 's' end || coalesce(' · ' || new.rating_comment, ''), 'rate-' || new.order_number);
+  end if;
+  return new;
+end $$;
+revoke all on function public.alert_low_rating() from public, anon, authenticated;
+drop trigger if exists orders_alert_low_rating on public.orders;
+create trigger orders_alert_low_rating after update of rating on public.orders for each row execute function public.alert_low_rating();
+
+-- Remember when cooking started (used for the "ready around" time).
+create or replace function public.stamp_cooking()
+returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if new.status = 'Cooking' and old.status is distinct from 'Cooking' and new.cooking_at is null then new.cooking_at := now(); end if;
+  return new;
+end $$;
+drop trigger if exists orders_stamp_cooking on public.orders;
+create trigger orders_stamp_cooking before update on public.orders for each row execute function public.stamp_cooking();
+
+-- Cancel UPI orders that nobody paid for (and nobody claimed to have paid) after the time each restaurant sets.
+create or replace function public.cancel_unpaid_upi()
+returns int
+language plpgsql security definer set search_path = public as $$
+declare n int;
+begin
+  update public.orders o
+     set status = 'Cancelled', cancel_reason = 'The UPI payment was not received in time'
+    from public.restaurants r
+   where r.id = o.restaurant_id and r.unpaid_cancel_minutes is not null
+     and o.payment_method = 'UPI' and o.payment_status = 'pending' and o.payment_claimed_at is null and o.status = 'New'
+     and o.created_at < now() - make_interval(mins => r.unpaid_cancel_minutes);
+  get diagnostics n = row_count;
+  return n;
+end $$;
+revoke all on function public.cancel_unpaid_upi() from public, anon, authenticated;
+do $$ begin
+  create extension if not exists pg_cron;
+  perform cron.schedule('cancel-unpaid-upi', '*/5 * * * *', 'select public.cancel_unpaid_upi()');
+exception when others then
+  raise notice 'pg_cron could not be set up here (%). Turn on pg_cron under Database > Extensions, then run this file again to auto-cancel unpaid UPI orders.', sqlerrm;
+end $$;
+
+-- Customers (staff only): one row per phone number across both restaurants.
+create or replace function public.customer_summary()
+returns jsonb
+language sql stable security invoker set search_path = public as $$
+  select coalesce(jsonb_agg(x order by (x->>'last_order')::timestamptz desc), '[]'::jsonb) from (
+    select jsonb_build_object(
+      'phone', o.customer_phone,
+      'name', (array_agg(split_part(o.customer_name, ' · ', 1) order by o.created_at desc))[1],
+      'orders', count(*), 'spent', coalesce(sum(o.total), 0), 'last_order', max(o.created_at),
+      'restaurants', (select jsonb_agg(distinct r.name) from public.restaurants r where r.id = any(array_agg(o.restaurant_id)))) as x
+    from public.orders o
+    where o.customer_phone is not null and o.status <> 'Cancelled' and o.payment_status <> 'pending'
+    group by o.customer_phone) t
+$$;
+revoke all on function public.customer_summary() from public, anon;
+grant execute on function public.customer_summary() to authenticated;
+
+-- Staff roles. Until the first role is saved, every signed-in person is an owner (so nobody gets locked out).
+create table if not exists public.staff_roles (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  role text not null check (role in ('owner', 'cook', 'delivery')),
+  created_at timestamptz not null default now()
+);
+alter table public.staff_roles enable row level security;   -- no policies: only the functions below read or change it
+
+create or replace function public.my_role()
+returns text
+language plpgsql stable security definer set search_path = public as $$
+declare r text;
+begin
+  if auth.uid() is null then return null; end if;
+  select role into r from public.staff_roles where user_id = auth.uid();
+  if r is not null then return r; end if;
+  if not exists (select 1 from public.staff_roles) then return 'owner'; end if;
+  return 'none';
+end $$;
+create or replace function public.is_owner() returns boolean language sql stable security definer set search_path = public as $$ select public.my_role() = 'owner' $$;
+revoke all on function public.my_role() from public, anon; grant execute on function public.my_role() to authenticated;
+revoke all on function public.is_owner() from public, anon; grant execute on function public.is_owner() to authenticated;
+
+create or replace function public.list_staff()
+returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_owner() then raise exception 'ROLE: Only the owner can see the team'; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('email', u.email, 'role', s.role) order by s.role, u.email)
+                     from public.staff_roles s join auth.users u on u.id = s.user_id), '[]'::jsonb);
+end $$;
+revoke all on function public.list_staff() from public, anon; grant execute on function public.list_staff() to authenticated;
+
+create or replace function public.set_staff_role(p_email text, p_role text)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare uid uuid;
+begin
+  if not public.is_owner() then raise exception 'ROLE: Only the owner can change roles'; end if;
+  select id into uid from auth.users where lower(email) = lower(trim(coalesce(p_email, '')));
+  if uid is null then raise exception 'ROLE: No account with that email. Add the person under Authentication > Users in Supabase first.'; end if;
+  if not exists (select 1 from public.staff_roles) then   -- first role ever saved: keep the person doing it as an owner
+    insert into public.staff_roles (user_id, role) values (auth.uid(), 'owner') on conflict (user_id) do nothing;
+  end if;
+  if p_role is null or p_role = 'remove' then
+    if exists (select 1 from public.staff_roles where user_id = uid and role = 'owner') and (select count(*) from public.staff_roles where role = 'owner') <= 1 then
+      raise exception 'ROLE: There must be at least one owner';
+    end if;
+    delete from public.staff_roles where user_id = uid;
+  elsif p_role in ('owner', 'cook', 'delivery') then
+    if uid = auth.uid() and p_role <> 'owner' and (select count(*) from public.staff_roles where role = 'owner') <= 1 then
+      raise exception 'ROLE: There must be at least one owner';
+    end if;
+    insert into public.staff_roles (user_id, role) values (uid, p_role) on conflict (user_id) do update set role = excluded.role;
+  else raise exception 'ROLE: Choose owner, cook or delivery'; end if;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.set_staff_role(text, text) from public, anon; grant execute on function public.set_staff_role(text, text) to authenticated;
+
+-- Settings tables can only be changed by the owner (cooks and delivery staff can still work on orders).
+drop policy if exists "Staff can manage restaurants" on public.restaurants;
+drop policy if exists "Owner can manage restaurants" on public.restaurants;
+create policy "Owner can manage restaurants" on public.restaurants for all to authenticated using (public.is_owner()) with check (public.is_owner());
+drop policy if exists "Staff can manage order limits" on public.order_limits;
+drop policy if exists "Owner can manage order limits" on public.order_limits;
+create policy "Owner can manage order limits" on public.order_limits for all to authenticated using (public.is_owner()) with check (public.is_owner());
+drop policy if exists "Staff can manage coupons" on public.coupons;
+drop policy if exists "Owner can manage coupons" on public.coupons;
+create policy "Owner can manage coupons" on public.coupons for all to authenticated using (public.is_owner()) with check (public.is_owner());
+drop policy if exists "Staff can manage restaurant secrets" on public.restaurant_secrets;
+drop policy if exists "Owner can manage restaurant secrets" on public.restaurant_secrets;
+create policy "Owner can manage restaurant secrets" on public.restaurant_secrets for all to authenticated using (public.is_owner()) with check (public.is_owner());
+drop policy if exists "Staff can manage the sales goal" on public.sales_goal;
+drop policy if exists "Staff can read the sales goal" on public.sales_goal;
+drop policy if exists "Owner can manage the sales goal" on public.sales_goal;
+create policy "Staff can read the sales goal" on public.sales_goal for select to authenticated using (true);
+create policy "Owner can manage the sales goal" on public.sales_goal for all to authenticated using (public.is_owner()) with check (public.is_owner());
+
+-- The kitchen sets (or changes) the delivery charge of an order, for example by distance. The total follows.
+create or replace function public.set_delivery_charge(p_order_number text, p_fee numeric)
+returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare o record; new_total numeric;
+begin
+  if coalesce(public.my_role(), '') not in ('owner', 'cook', 'delivery') then raise exception 'ROLE: Sign in as staff to set the delivery charge'; end if;
+  if p_fee is null or p_fee < 0 or p_fee > 5000 then raise exception 'CHARGE: Enter an amount from 0 to 5000'; end if;
+  select * into o from public.orders where order_number = upper(trim(coalesce(p_order_number, '')));
+  if not found then raise exception 'CHARGE: Order not found'; end if;
+  if o.status in ('Delivered', 'Cancelled') then raise exception 'CHARGE: This order is already %', lower(o.status); end if;
+  new_total := o.total - o.delivery_fee + round(p_fee);
+  update public.orders set delivery_fee = round(p_fee), total = new_total, delivery_fee_pending = false where id = o.id;
+  return jsonb_build_object('delivery_fee', round(p_fee), 'total', new_total);
+end $$;
+revoke all on function public.set_delivery_charge(text, numeric) from public, anon;
+grant execute on function public.set_delivery_charge(text, numeric) to authenticated;
