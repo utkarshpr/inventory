@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { supabase } from './supabase'
+import { qrMatrix } from './qr'
 import { useRestaurants, themeStyle, logoFor, Mark, wordmarkLines, closedText, dayParts, deliveryText, scheduleLabel, usePageBrand, zonedNow } from './restaurants'
 import './public.css'
 
@@ -333,6 +334,7 @@ function OrderPage({ r, list }) {
             <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="House or flat, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
             <fieldset className="c-field c-pay"><legend>Payment</legend>
               <div className="c-chips">{PAYMENTS.map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
+              {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">After you place the order you'll get a Pay with UPI button and a QR code.</p>}
             </fieldset>
             <div className="c-field c-coupon"><span>Coupon code <small>optional</small></span>
               <div className="c-coupon-row"><input className="c-input" aria-label="Coupon code" value={couponText} onChange={e => { setCouponText(e.target.value.toUpperCase()); if (coupon) { setCoupon(null); setCouponMsg('') } }} autoCapitalize="characters" autoCorrect="off" spellCheck="false" maxLength={20} placeholder="e.g. WELCOME50" />
@@ -354,6 +356,13 @@ function OrderPage({ r, list }) {
 }
 
 /* Pay by UPI: opens the customer's UPI app with the amount filled in. Shown only when the restaurant has set a UPI ID and the customer chose UPI. */
+function QrCode({ text, label }) {
+  let m = null
+  try { m = qrMatrix(text) } catch { return null }
+  const n = m.length, q = 4, d = []
+  m.forEach((row, y) => row.forEach((v, x) => { if (v) d.push(`M${x + q} ${y + q}h1v1h-1z`) }))
+  return <svg className="c-qr" viewBox={`0 0 ${n + q * 2} ${n + q * 2}`} role="img" aria-label={label} shapeRendering="crispEdges"><rect width="100%" height="100%" fill="#fff" /><path d={d.join('')} fill="#111" /></svg>
+}
 const UPI_RE = /^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/
 function UpiPay({ r, order }) {
   const [copied, setCopied] = useState(false)
@@ -361,6 +370,7 @@ function UpiPay({ r, order }) {
   const link = `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent(r.name)}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${encodeURIComponent('Order ' + order.ref)}`
   return <div className="c-upi">
     <a className="c-cta c-cta-accent c-upi-btn" href={link}>Pay {money(order.total)} with UPI</a>
+    <figure className="c-upi-qr"><QrCode text={link} label={`UPI QR code to pay ${money(order.total)} to ${r.name}`} /><figcaption>Or scan this with any UPI app</figcaption></figure>
     <p className="c-upi-id">UPI ID <code>{r.upi_id}</code> <button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(r.upi_id); setCopied(true); setTimeout(() => setCopied(false), 2000) }}>{copied ? 'Copied' : 'Copy'}</button></p>
     <small className="c-upi-note">Opens your UPI app. Use the order number {order.ref} as the note. {r.name} confirms your payment.</small>
   </div>

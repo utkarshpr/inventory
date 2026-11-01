@@ -118,7 +118,7 @@ The ntfy topic in Settings keeps working as a separate backup.
 - **Sold out today**: on a dish in Recipes, switch "Sold out today". Customers see "Sold out today" and can't add it. It clears itself the next day.
 - **Dish photos**: add a photo to a dish in Recipes. It is resized on the phone and stored in the free `dish-photos` storage bucket (created by `schema.sql`).
 - **Coupon codes** (Settings → Coupon codes): percent or rupees off, optional cap, minimum order, expiry date and use limit, for both restaurants or one. The server works out the discount.
-- **UPI pay button**: each restaurant sets its own UPI ID in its Settings. Customers who choose UPI get a "Pay with UPI" button with the amount filled in. No gateway, no fees; you confirm payments yourself.
+- **UPI pay button**: each restaurant sets its own UPI ID in its Settings. Customers who choose UPI get a "Pay with UPI" button and a QR code, both with the amount filled in. The QR code is made by `src/qr.js`, so no extra package is needed. No gateway, no fees; you confirm payments yourself.
 - **WhatsApp button** on each order: opens WhatsApp to the customer with a ready message for the order's status. You press send.
 - **Order again** on the tracking page: refills the cart from a past order at today's prices.
 - **Low-stock alerts**: a notification when an ingredient falls to its reorder level. Turn on or off per restaurant in Settings.

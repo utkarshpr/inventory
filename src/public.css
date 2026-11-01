@@ -380,3 +380,8 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-again-btn{margin-top:12px}
 .c-app .c-upi-btn{display:flex;align-items:center;justify-content:center;min-height:56px;line-height:1}
 .c-app .c-upi-id code{font-size:13.5px}
+
+/* UPI QR */
+.c-app .c-upi-qr{margin:2px auto 0;display:grid;justify-items:center;gap:8px}
+.c-app .c-qr{width:min(210px,62vw);height:auto;border-radius:16px;box-shadow:0 8px 22px rgba(0,0,0,.22)}
+.c-app .c-upi-qr figcaption{font-size:13px;opacity:.85}
