@@ -385,3 +385,25 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-upi-qr{margin:2px auto 0;display:grid;justify-items:center;gap:8px}
 .c-app .c-qr{width:min(210px,62vw);height:auto;border-radius:16px;box-shadow:0 8px 22px rgba(0,0,0,.22)}
 .c-app .c-upi-qr figcaption{font-size:13px;opacity:.85}
+
+/* payment status on tracking */
+.c-app .c-pay-note{margin:10px 0 2px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--c-accent-solid) 22%,transparent);font-size:14px;line-height:1.4}
+.c-app .c-pay-ok{margin:8px 0 0;font-size:14px;font-weight:700;color:var(--c-green)}
+
+.c-app .c-dlg-paywait{display:inline-block;margin:-2px 0 10px;padding:6px 14px;border-radius:999px;background:color-mix(in srgb,var(--c-hero-ink) 18%,transparent);font-size:14px;font-weight:700}
+.c-app .c-steps li:first-child:has(+ li){--x:0}
+
+/* payment confirmation popup: stays until the kitchen confirms, then disappears */
+.c-app .c-paypop{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top));z-index:50;max-width:540px;margin:0 auto;display:flex;gap:12px;align-items:center;padding:14px 16px;border-radius:20px;background:var(--c-dark);color:var(--c-dark-ink);box-shadow:0 16px 38px rgba(0,0,0,.34)}
+.c-app .c-paypop b{display:block;font-size:16px}
+.c-app .c-paypop small{display:block;font-size:13px;opacity:.85;line-height:1.35;margin-top:2px}
+.c-app .c-paypop-dot{flex:none;width:14px;height:14px;border-radius:50%;background:var(--c-accent-solid)}
+.c-app .c-paypop-tick{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--c-green);color:#fff;font-weight:800}
+.c-app .c-paypop.ok{background:var(--c-green);color:#fff}
+.c-app .c-paypop.ok .c-paypop-tick{background:#fff;color:var(--c-green)}
+.c-app .c-dlg-paywait.ok{background:var(--c-green);color:#fff}
+@media (prefers-reduced-motion:no-preference){
+  .c-app .c-paypop-dot{animation:c-paydot 1.4s ease-in-out infinite}
+  @keyframes c-paydot{0%,100%{transform:scale(.8);opacity:.6}50%{transform:scale(1.15);opacity:1}}
+  .c-app .c-paypop{animation:c-rise-in .3s ease-out both}
+}

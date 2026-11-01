@@ -141,11 +141,14 @@ export function TrackOrder({ initialRef, compact, slug }) {
   useEffect(() => { if (initialRef) { setCode(initialRef); lookup(initialRef) } }, [initialRef])
   useEffect(() => {
     if (!active || ['Delivered', 'Cancelled'].includes(result?.status)) return
-    const timer = setInterval(() => lookup(active, true), 15000)
+    const timer = setInterval(() => lookup(active, true), result?.payment_status === 'pending' ? 5000 : 15000)
     return () => clearInterval(timer)
-  }, [active, result?.status])
-  const current = STEPS.findIndex(([status]) => status === result?.status)
-  const label = (STEPS[current] || [])[1]
+  }, [active, result?.status, result?.payment_status])
+  // A UPI order starts with its payment: "Payment confirmation pending" comes first, then the kitchen steps.
+  const payFlow = result && (result.payment_status === 'pending' || result.payment_status === 'received')
+  const steps = payFlow ? [['Payment', result.payment_status === 'pending' ? 'Payment confirmation pending' : 'Payment confirmed'], ...STEPS] : STEPS
+  const current = result && result.payment_status === 'pending' ? 0 : steps.findIndex(([status]) => status === result?.status)
+  const label = result && result.payment_status === 'pending' ? 'Payment pending' : (steps[current] || [])[1]
   return <div className="c-track">
     {!compact && <>
       <h2 className="c-h2">Track your order</h2>
@@ -159,8 +162,8 @@ export function TrackOrder({ initialRef, compact, slug }) {
       <p className="c-sub">{list.total} order{list.total === 1 ? '' : 's'} for this number. Tap one to see its status.</p>
       <ul className="c-ordlist">{list.orders.map(o => <li key={o.order_number}><button type="button" className={o.order_number === active ? 'c-ordrow on' : 'c-ordrow'} onClick={() => lookup(o.order_number, true)}>
         {logoFor(o.restaurant_slug) && <img className="c-logo" src={logoFor(o.restaurant_slug)} alt="" width="32" height="32" />}
-        <span className="c-ordmain"><b>{o.order_number}</b><small>{o.restaurant} · {placedText(o.placed_at)} · {money(o.total)}</small><small className="c-orditems">{itemText(o.items)}</small></span>
-        <span className={o.status === 'Cancelled' ? 'c-pill bad' : o.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{o.status}</span>
+        <span className="c-ordmain"><b>{o.order_number}</b><small>{o.restaurant} · {placedText(o.placed_at)} · {money(o.total)}{o.payment_status === 'pending' && o.status !== 'Cancelled' ? ' · payment pending' : ''}</small><small className="c-orditems">{itemText(o.items)}</small></span>
+        <span className={o.status === 'Cancelled' ? 'c-pill bad' : o.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{o.payment_status === 'pending' && o.status !== 'Cancelled' ? 'Payment pending' : o.status}</span>
       </button>{o.restaurant_slug && <button type="button" className="c-again" onClick={() => orderAgain(o.restaurant_slug, o.items)}>Order again</button>}</li>)}</ul>
       {list.total > PAGE && <div className="c-pager"><button type="button" className="c-btn c-btn-line" disabled={list.page === 0} onClick={() => loadPhone(list.phone, list.page - 1)}>Previous</button><span>Page {list.page + 1} of {Math.ceil(list.total / PAGE)}</span><button type="button" className="c-btn c-btn-line" disabled={(list.page + 1) * PAGE >= list.total} onClick={() => loadPhone(list.phone, list.page + 1)}>Next</button></div>}
     </div>}
@@ -169,10 +172,12 @@ export function TrackOrder({ initialRef, compact, slug }) {
       : <div className="track-result c-result">
           {result.restaurant && <p className="c-rest-chip">{logoFor(result.restaurant_slug) && <img className="c-logo" src={logoFor(result.restaurant_slug)} alt="" width="24" height="24" />}<span>{result.restaurant}</span></p>}
           <div className="c-result-head">{compact ? <span className="c-sub">Order status</span> : <b>{result.order_number}</b>}<span className={result.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{label}</span></div>
+          {result.payment_status === 'pending' && <p className="c-pay-note" role="status"><b>Waiting for your UPI payment to be confirmed.</b> {result.restaurant || 'The kitchen'} starts cooking once the payment is confirmed.</p>}
+          {result.payment_status === 'received' && <p className="c-pay-ok" role="status">Payment confirmed</p>}
           {result.placed_at && <p className="c-sub">Placed {placedText(result.placed_at)}</p>}
           {result.items && result.items.length > 0 && <p className="c-sub c-items">{itemText(result.items)}</p>}
           {result.delivery_date && <p className="c-sub c-deliver">Delivery: {deliveryText(result.delivery_date, zonedNow('Asia/Kolkata').date)}</p>}
-          <ol className="c-steps">{STEPS.map(([status, text], i) => <li key={status} style={{ '--i': i }} className={i < current ? 'done' : i === current ? 'now' : ''}>{text}</li>)}</ol>
+          <ol className="c-steps">{steps.map(([status, text], i) => <li key={status} style={{ '--i': i }} className={i < current ? 'done' : i === current ? 'now' : ''}>{text}</li>)}</ol>
           <p className="c-sub">Total {money(result.total)}. This updates by itself.</p>
           {!compact && result.restaurant_slug && <button type="button" className="c-btn c-btn-line c-again-btn" onClick={() => orderAgain(result.restaurant_slug, result.items)}>Order again</button>}
         </div>)}
@@ -186,6 +191,7 @@ function OrderPage({ r, list }) {
   const [name, setName] = useState(''), [phone, setPhone] = useState(''), [address, setAddress] = useState(''), [payment, setPayment] = useState(PAYMENTS[0]), [notes, setNotes] = useState('')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [placed, setPlaced] = useState(null), [dialog, setDialog] = useState(false)
   const [copied, setCopied] = useState(false), [forcedClosed, setForcedClosed] = useState('')
+  const [payState, setPayState] = useState(null)   // { ref, status: 'pending' | 'received' } for a UPI order just placed
   const [couponText, setCouponText] = useState(''), [coupon, setCoupon] = useState(null), [couponMsg, setCouponMsg] = useState(''), [reorderNote, setReorderNote] = useState('')
   const kitchenToday = zonedNow(r.timezone || 'Asia/Kolkata').date
   const soldOut = (d) => Boolean(d.sold_out_date) && d.sold_out_date === kitchenToday
@@ -246,6 +252,21 @@ function OrderPage({ r, list }) {
     setCoupon({ code: data.code, discount: Number(data.discount) }); setCouponMsg(quiet ? '' : `Code ${data.code} applied`)
   }
   useEffect(() => { if (coupon) checkCoupon(coupon.code, total, true) }, [total])   // the discount follows the cart
+  useEffect(() => {   // after a UPI order: ask every few seconds whether the kitchen has confirmed the payment
+    if (!payState || payState.status !== 'pending' || !supabase) return
+    const timer = setInterval(async () => {
+      const { data } = await supabase.rpc('track_order', { p_order_number: payState.ref })
+      if (!data) return
+      if (data.status === 'Cancelled') setPayState(null)
+      else if (data.payment_status !== 'pending') setPayState({ ref: payState.ref, status: 'received' })
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [payState && payState.ref, payState && payState.status])
+  useEffect(() => {   // "Payment confirmed" stays for a moment, then the popup disappears
+    if (!payState || payState.status !== 'received') return
+    const t = setTimeout(() => setPayState(null), 4500)
+    return () => clearTimeout(t)
+  }, [payState && payState.status])
   const copyRef = async () => { if (!placed) return; await copyText(placed.ref); setCopied(true); setTimeout(() => setCopied(false), 2000) }
 
   const submit = async (e) => {
@@ -266,6 +287,7 @@ function OrderPage({ r, list }) {
     const ref = data.order_number
     setPlaced({ ref, total: Number(data.total), subtotal: Number(data.subtotal || data.total), discount: Number(data.discount || 0), coupon: data.coupon || '', payment, deliveryDate: data.delivery_date, today, items: (data.items || []).filter(i => !String(i.name).startsWith('Note:')) })
     setDialog(true)
+    setPayState(payment === 'UPI' ? { ref, status: 'pending' } : null)
     try { localStorage.setItem('last-order-ref', ref); localStorage.setItem(`last-order-ref:${r.slug}`, ref) } catch { /* optional */ }
     setQty({}); setNotes(''); setCoupon(null); setCouponText(''); setCouponMsg('')
   }
@@ -293,7 +315,7 @@ function OrderPage({ r, list }) {
             <h2 className="c-h2">Order placed</h2>
             <div className="c-ref-row"><code className="c-ref">{placed.ref}</code><button type="button" className="c-btn c-btn-line" onClick={copyRef}>{copied ? 'Copied' : 'Copy'}</button></div>
             <p className="c-sub">Total {money(placed.total)}{placed.discount > 0 ? ` (code ${placed.coupon} saved you ${money(placed.discount)})` : ''}. Keep this number to track your order.</p>
-            <UpiPay r={r} order={placed} />
+            <UpiPay r={r} order={placed} show={Boolean(payState && payState.status === 'pending')} />
             {placed.deliveryDate && <p className="c-deliver-line">Delivery: {deliveryText(placed.deliveryDate, placed.today)}</p>}
             <WhatsAppLink r={r} className="c-wa" />
             <TrackOrder initialRef={placed.ref} compact />
@@ -351,7 +373,13 @@ function OrderPage({ r, list }) {
       <button form="order-form" className="c-cta c-cta-accent customer-submit" disabled={sending || !deliveryDate || belowMin}>{belowMin ? `Add ${money(minOrder - total)} more` : sending ? 'Placing order…' : 'Place order'}</button>
     </div>}
 
-    {dialog && placed && <OrderDialog r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
+    {payState && !dialog && <div className={payState.status === 'pending' ? 'c-paypop' : 'c-paypop ok'} role="status" aria-live="polite">
+      {payState.status === 'pending'
+        ? <><span className="c-paypop-dot" aria-hidden="true" /><div><b>Payment confirmation pending</b><small>{payState.ref} · {r.name} will start cooking once it confirms your UPI payment.</small></div></>
+        : <><span className="c-paypop-tick" aria-hidden="true">✓</span><div><b>Payment confirmed</b><small>{payState.ref} · The kitchen is getting started.</small></div></>}
+    </div>}
+
+    {dialog && placed && <OrderDialog payStatus={payState && payState.status} r={r} order={placed} copied={copied} onCopy={copyRef} onClose={() => { setDialog(false); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
   </div>
 }
 
@@ -364,20 +392,20 @@ function QrCode({ text, label }) {
   return <svg className="c-qr" viewBox={`0 0 ${n + q * 2} ${n + q * 2}`} role="img" aria-label={label} shapeRendering="crispEdges"><rect width="100%" height="100%" fill="#fff" /><path d={d.join('')} fill="#111" /></svg>
 }
 const UPI_RE = /^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/
-function UpiPay({ r, order }) {
+function UpiPay({ r, order, show }) {
   const [copied, setCopied] = useState(false)
-  if (!r.upi_id || !UPI_RE.test(r.upi_id) || order.payment !== 'UPI') return null
+  if (!show || !r.upi_id || !UPI_RE.test(r.upi_id) || order.payment !== 'UPI') return null
   const link = `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent(r.name)}&am=${Number(order.total).toFixed(2)}&cu=INR&tn=${encodeURIComponent('Order ' + order.ref)}`
   return <div className="c-upi">
     <a className="c-cta c-cta-accent c-upi-btn" href={link}>Pay {money(order.total)} with UPI</a>
     <figure className="c-upi-qr"><QrCode text={link} label={`UPI QR code to pay ${money(order.total)} to ${r.name}`} /><figcaption>Or scan this with any UPI app</figcaption></figure>
     <p className="c-upi-id">UPI ID <code>{r.upi_id}</code> <button type="button" className="c-btn c-btn-line" onClick={async () => { await copyText(r.upi_id); setCopied(true); setTimeout(() => setCopied(false), 2000) }}>{copied ? 'Copied' : 'Copy'}</button></p>
-    <small className="c-upi-note">Opens your UPI app. Use the order number {order.ref} as the note. {r.name} confirms your payment.</small>
+    <small className="c-upi-note">Opens your UPI app. Use the order number {order.ref} as the note. After you pay, {r.name} confirms your payment and then starts cooking.</small>
   </div>
 }
 
 /* The centred "order received" confirmation, in the restaurant's own colours */
-function OrderDialog({ r, order, copied, onCopy, onClose }) {
+function OrderDialog({ r, order, copied, onCopy, onClose, payStatus }) {
   const done = useRef(null)
   useEffect(() => {
     done.current && done.current.focus()
@@ -391,13 +419,15 @@ function OrderDialog({ r, order, copied, onCopy, onClose }) {
       <p className="c-dlg-rest">{r.name}</p>
       <svg className="c-check" width="44" height="44" viewBox="0 0 44 44" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="22" cy="22" r="16" /><path d="M14.5 22.5l5 5 10-11" /></svg>
       <h2 id="od-title" className="c-dlg-title">Order received!</h2>
+      {order.payment === 'UPI' && payStatus === 'pending' && <p className="c-dlg-paywait" role="status">Payment confirmation pending</p>}
+      {order.payment === 'UPI' && payStatus === 'received' && <p className="c-dlg-paywait ok" role="status">Payment confirmed ✓</p>}
       <p className="c-dlg-line">Your reference is</p>
       <div className="c-dlg-ref"><code>{order.ref}</code><button type="button" className="c-btn c-btn-ink" onClick={onCopy}>{copied ? 'Copied' : 'Copy'}</button></div>
       <p className="c-dlg-total">Total: {money(order.total)}</p>
       {order.discount > 0 && <p className="c-dlg-deliver">Code {order.coupon}: you saved {money(order.discount)}</p>}
       {order.deliveryDate && <p className="c-dlg-deliver">Delivery: {deliveryText(order.deliveryDate, order.today)}</p>}
       {order.items.length > 0 && <ul className="c-dlg-items" aria-label="Your order">{order.items.map((i, k) => <li key={k}><span>{i.quantity} × {i.name}</span><span>{money(i.price * i.quantity)}</span></li>)}</ul>}
-      <UpiPay r={r} order={order} />
+      <UpiPay r={r} order={order} show={payStatus === 'pending'} />
       <WhatsAppLink r={r} className="c-wa c-wa-dlg" />
       <p className="c-dlg-hint">Keep this number to track your order.</p>
       <button ref={done} type="button" className="c-cta c-cta-hero" onClick={onClose}>Done</button>

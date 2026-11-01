@@ -387,3 +387,13 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .switch.ok.on{background:#2f7d4a}
 .backup-row{display:flex;flex-wrap:wrap;gap:10px}
 .backup-btn{min-height:48px;padding:0 16px;border:1px solid var(--line,#3a3a3a);border-radius:12px}
+
+/* ---- UPI payment approval ---- */
+.pay-tag{display:inline-block;margin-top:3px;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:700;background:rgba(224,160,40,.2);color:#9a6400}
+.pay-tag.ok{background:rgba(47,125,74,.16);color:#2f7d4a}
+.pay-confirm{background:#B83221;color:#fff;border-color:transparent;font-weight:700}
+.pay-dialog{max-width:460px;display:grid;gap:12px}
+.pay-dialog h3{margin:0}
+.pay-warn{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.prep-wait{margin:6px 0 12px;padding:10px 12px;border-radius:12px;background:rgba(224,160,40,.16);font-size:14px;line-height:1.4}
+.oa-pay{margin:6px 0 0;padding:6px 10px;border-radius:10px;background:rgba(255,255,255,.2);font-size:13px;font-weight:700}

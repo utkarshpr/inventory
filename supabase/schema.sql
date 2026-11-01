@@ -139,6 +139,8 @@ exception when duplicate_object then null; end $$;
 alter table public.orders add column if not exists delivery_date date;
 alter table public.orders add column if not exists cancel_reason text;
 alter table public.orders add column if not exists coupon_code text;
+alter table public.orders add column if not exists payment_status text not null default 'not_required' check (payment_status in ('not_required', 'pending', 'received'));   -- UPI orders wait for staff to confirm the payment
+alter table public.orders add column if not exists payment_confirmed_at timestamptz;
 alter table public.orders add column if not exists discount numeric not null default 0;
 alter table public.recipes add column if not exists sold_out_date date;   -- sold out for that day only; clears itself the next day
 alter table public.recipes add column if not exists image_url text;
@@ -200,12 +202,12 @@ language sql stable security invoker set search_path = public as $$
   select jsonb_build_object(
     'name', g.name, 'target', g.target, 'start_date', g.start_date,
     'total', coalesce((select sum(o.total) from public.orders o
-                        where o.status <> 'Cancelled' and (o.created_at at time zone 'Asia/Kolkata')::date >= g.start_date), 0),
+                        where o.status <> 'Cancelled' and o.payment_status <> 'pending' and (o.created_at at time zone 'Asia/Kolkata')::date >= g.start_date), 0),
     'by_restaurant', (select coalesce(jsonb_agg(jsonb_build_object('restaurant_id', r.id, 'name', r.name, 'slug', r.slug,
                               'sales', coalesce(s.sales, 0), 'orders', coalesce(s.n, 0)) order by r.sort_order), '[]'::jsonb)
                         from public.restaurants r
                         left join (select o.restaurant_id, sum(o.total) as sales, count(*) as n from public.orders o
-                                    where o.status <> 'Cancelled' and (o.created_at at time zone 'Asia/Kolkata')::date >= g.start_date
+                                    where o.status <> 'Cancelled' and o.payment_status <> 'pending' and (o.created_at at time zone 'Asia/Kolkata')::date >= g.start_date
                                     group by o.restaurant_id) s on s.restaurant_id = r.id))
   from public.sales_goal g limit 1;
 $$;
@@ -461,8 +463,9 @@ begin
   loop
     num := rest.order_prefix || '-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
     begin
-      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method, coupon_code, discount)
-      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment, v_code, v_disc);
+      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, status, total, items, delivery_address, delivery_date, payment_method, coupon_code, discount, payment_status)
+      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Customer form', 'New', total, lines, trim(p_address), p_delivery_date, p_payment, v_code, v_disc,
+              case when p_payment = 'UPI' then 'pending' else 'not_required' end);
       exit;
     exception when unique_violation then
       tries := tries + 1;
@@ -517,7 +520,7 @@ returns jsonb
 language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
     'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
+    'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug)
   from public.orders o join public.restaurants r on r.id = o.restaurant_id
   where o.order_number = upper(trim(p_order_number))
   limit 1;
@@ -532,7 +535,7 @@ begin
   select count(*) into v_total from public.orders where customer_phone = v_phone;
   select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
     select jsonb_build_object('order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
+      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
     from public.orders o join public.restaurants r on r.id = o.restaurant_id
     where o.customer_phone = v_phone order by o.created_at desc limit v_lim offset v_off) s;
   return jsonb_build_object('total', v_total, 'limit', v_lim, 'offset', v_off, 'orders', v_rows);
@@ -762,8 +765,8 @@ declare r record; c record; g record; body text := ''; tot numeric := 0; goal_to
 begin
   for r in
     select rs.id, rs.name,
-           coalesce(sum(o.total) filter (where o.status <> 'Cancelled'), 0) as sales,
-           count(o.id) filter (where o.status <> 'Cancelled') as n,
+           coalesce(sum(o.total) filter (where o.status <> 'Cancelled' and o.payment_status <> 'pending'), 0) as sales,
+           count(o.id) filter (where o.status <> 'Cancelled' and o.payment_status <> 'pending') as n,
            count(o.id) filter (where o.status = 'Cancelled') as cancelled
       from public.restaurants rs
       left join public.orders o on o.restaurant_id = rs.id and (o.created_at at time zone 'Asia/Kolkata')::date = today
@@ -779,7 +782,7 @@ begin
   body := body || 'Total ₹' || trim_scale(tot)::text;
   select * into g from public.sales_goal limit 1;
   if found then
-    select coalesce(sum(total), 0) into goal_total from public.orders where status <> 'Cancelled' and (created_at at time zone 'Asia/Kolkata')::date >= g.start_date;
+    select coalesce(sum(total), 0) into goal_total from public.orders where status <> 'Cancelled' and payment_status <> 'pending' and (created_at at time zone 'Asia/Kolkata')::date >= g.start_date;
     body := body || E'\n' || g.name || ': ' || floor(goal_total * 100 / g.target)::text || '% (₹' || trim_scale(goal_total)::text || ' of ₹' || trim_scale(g.target)::text || ')';
   end if;
   select function_url, shared_secret into c from public.push_config limit 1;
@@ -827,3 +830,19 @@ do $$ begin
 exception when others then
   raise notice 'Dish photo storage could not be set up here (%). Create a public bucket named dish-photos under Storage.', sqlerrm;
 end $$;
+
+-- ============================================================
+-- 10. UPI payments: an order paid by UPI cannot be cooked until staff confirm the payment
+-- ============================================================
+create or replace function public.gate_payment()
+returns trigger
+language plpgsql set search_path = public as $$
+begin
+  if new.payment_status = 'pending' and new.status in ('Cooking', 'Ready', 'Delivered') and new.status is distinct from old.status then
+    raise exception 'PAYMENT_PENDING: Confirm the UPI payment before cooking this order';
+  end if;
+  return new;
+end $$;
+drop trigger if exists orders_gate_payment on public.orders;
+create trigger orders_gate_payment before update on public.orders
+  for each row execute function public.gate_payment();

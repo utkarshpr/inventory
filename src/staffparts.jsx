@@ -52,6 +52,7 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear })
         <p className="oa-cust">{o.customer}</p>
         {o.deliveryDate && <p className="oa-deliver">Delivery: {deliveryText(o.deliveryDate, a.today)}</p>}
         <ul className="oa-items">{a.lines.map((l, i) => <li key={i}><span>{l.quantity} × {l.name}</span>{l.price ? <span>₹{l.price * l.quantity}</span> : null}</li>)}</ul>
+        {o.paymentStatus === 'pending' && <p className="oa-pay">UPI order: confirm the payment before cooking.</p>}
         {(o.payment || o.address) && <p className="oa-meta">{[o.payment, o.address].filter(Boolean).join(' · ')}</p>}
         <div className="oa-foot"><b className="oa-total">₹{o.total}</b><button type="button" className="oa-view" onClick={() => onView(a)}>View order</button></div>
       </article>
