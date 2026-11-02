@@ -86,6 +86,7 @@ language sql stable as $$ select id from public.restaurants where slug = 'salt-a
 alter table public.restaurants      add column if not exists location text;
 alter table public.restaurants      add column if not exists upi_enabled boolean not null default true;
 alter table public.restaurants      add column if not exists bulk_enabled boolean not null default false;
+alter table public.restaurants      add column if not exists bulk_upi_enabled boolean not null default true;
 alter table public.restaurants      add column if not exists bulk_min_qty int not null default 10;
 alter table public.restaurants      add column if not exists bulk_lead_days int not null default 1;
 alter table public.restaurants      add column if not exists bulk_advance_pct int not null default 0;
@@ -1289,8 +1290,8 @@ begin
     raise exception 'Some details are too long';
   end if;
   if p_payment not in ('Cash on delivery', 'UPI') then raise exception 'Invalid payment method'; end if;
-  if p_payment = 'UPI' and not coalesce(rest.upi_enabled, true) then
-    raise exception 'UPI_OFF: UPI is not available right now. Please choose cash on delivery.';
+  if p_payment = 'UPI' and not coalesce(rest.bulk_upi_enabled, true) then
+    raise exception 'UPI_OFF: UPI is not available for bulk orders right now. Please choose cash on delivery.';
   end if;
   v_phone := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
   if length(v_phone) > 10 then v_phone := right(v_phone, 10); end if;

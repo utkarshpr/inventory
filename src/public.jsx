@@ -663,7 +663,7 @@ const bulkPrice = (item, q) => { const t = (item.tiers || []).filter(x => Number
 function BulkOrderPage({ r, list }) {
   usePageBrand(r, `Order in bulk · ${r.name}`)
   const saved = (() => { try { return JSON.parse(localStorage.getItem('customer-details') || '{}') || {} } catch { return {} } })()
-  const [menu, setMenu] = useState(null), [qty, setQty] = useState({}), [date, setDate] = useState(''), [slot, setSlot] = useState(''), [guests, setGuests] = useState(''), [spice, setSpice] = useState(''), [packing, setPacking] = useState('Individual boxes')
+  const [menu, setMenu] = useState(null), [qty, setQty] = useState({}), [date, setDate] = useState(''), [slot, setSlot] = useState(''), [guests, setGuests] = useState(''), [spice, setSpice] = useState('')
   const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [notes, setNotes] = useState(''), [payment, setPayment] = useState('Cash on delivery')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [done, setDone] = useState(null), [copied, setCopied] = useState(false), [claimed, setClaimed] = useState(false)
   useEffect(() => {
@@ -696,7 +696,7 @@ function BulkOrderPage({ r, list }) {
     if (!date) return setError('Choose a delivery date.')
     if (tooMany) return setError(left === 0 ? 'That date is fully booked. Please choose another date.' : `Only ${left} plates are left on that date.`)
     setSending(true); setError('')
-    const { data, error: err } = await supabase.rpc('place_bulk_order', { p_restaurant: r.slug, p_name: name.trim(), p_phone: phone.trim(), p_address: address.trim(), p_payment: payment, p_notes: notes.trim(), p_items: lines.map(l => ({ item_id: l.item.id, quantity: l.q })), p_delivery_date: date, p_slot: slot || null, p_guests: guests ? Number(guests) : null, p_spice: spice || null, p_packing: packing || null })
+    const { data, error: err } = await supabase.rpc('place_bulk_order', { p_restaurant: r.slug, p_name: name.trim(), p_phone: phone.trim(), p_address: address.trim(), p_payment: payment, p_notes: notes.trim(), p_items: lines.map(l => ({ item_id: l.item.id, quantity: l.q })), p_delivery_date: date, p_slot: slot || null, p_guests: guests ? Number(guests) : null, p_spice: spice || null, p_packing: null })
     setSending(false)
     if (err) { const known = /^(BULK_[A-Z]+|INVALID_PHONE|RATE_LIMIT|UPI_OFF|RESTAURANT_CLOSED):/.test(err.message.replace(/^.*?(?=[A-Z_]+:)/, '')); return setError(known ? err.message.replace(/^.*?([A-Z_]+):\s*/, '') : `Could not place your order: ${err.message}`) }
     try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim() })) } catch { /* optional */ }
@@ -731,13 +731,12 @@ function BulkOrderPage({ r, list }) {
         <h2 className="c-h2 c-cat">About your event</h2>
         <label className="c-field"><span>Number of guests <small>optional</small></span><input className="c-input" type="number" inputMode="numeric" min="1" value={guests} onChange={e => setGuests(e.target.value)} /></label>
         <fieldset className="c-field"><legend>Spice level <small>optional</small></legend><div className="c-chips">{['Mild', 'Medium', 'Hot'].map(s => <label key={s} className={spice === s ? 'c-chip on' : 'c-chip'}><input type="radio" name="spice" checked={spice === s} onChange={() => setSpice(spice === s ? '' : s)} onClick={() => { if (spice === s) setSpice('') }} />{s}</label>)}</div></fieldset>
-        <fieldset className="c-field"><legend>Packing</legend><div className="c-chips">{['Individual boxes', 'Bulk trays'].map(s => <label key={s} className={packing === s ? 'c-chip on' : 'c-chip'}><input type="radio" name="packing" checked={packing === s} onChange={() => setPacking(s)} />{s}</label>)}</div></fieldset>
 
         <h2 className="c-h2 c-cat">Delivery details</h2>
         <label className="c-field"><span>Name</span><input className="c-input" required autoComplete="name" value={name} onChange={e => setName(e.target.value)} /></label>
         <label className="c-field"><span>Phone number <small>10-digit mobile</small></span><input className="c-input" required maxLength={16} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={e => setPhone(e.target.value)} /></label>
         <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="Venue, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
-        <fieldset className="c-field c-pay"><legend>Payment</legend><div className="c-chips">{PAYMENTS.filter(x => x !== 'UPI' || r.upi_enabled !== false).map(x => <label key={x} className={payment === x ? 'c-chip on' : 'c-chip'}><input type="radio" name="bulk-payment" checked={payment === x} onChange={() => setPayment(x)} />{x}</label>)}</div></fieldset>
+        <fieldset className="c-field c-pay"><legend>Payment</legend><div className="c-chips">{PAYMENTS.filter(x => x !== 'UPI' || r.bulk_upi_enabled !== false).map(x => <label key={x} className={payment === x ? 'c-chip on' : 'c-chip'}><input type="radio" name="bulk-payment" checked={payment === x} onChange={() => setPayment(x)} />{x}</label>)}</div></fieldset>
         <label className="c-field"><span>Notes <small>optional</small></span><textarea className="c-input" rows={2} placeholder="Anything the kitchen should know" value={notes} onChange={e => setNotes(e.target.value)} /></label>
 
         {lines.length > 0 && <div className="c-summary" aria-label="Bulk order summary">
