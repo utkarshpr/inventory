@@ -594,3 +594,5 @@ body{background:var(--cream);color:var(--ink);-webkit-tap-highlight-color:transp
 .split-card small{color:#7a6a58}
 .split-card.total{grid-column:1/-1;background:#4a2a1a;color:#fff}
 .split-card.total span,.split-card.total small{color:rgba(255,255,255,.8)}
+
+.load-older{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:14px 0 4px;color:#7a6a58}

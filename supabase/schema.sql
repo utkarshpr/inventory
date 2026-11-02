@@ -1259,7 +1259,7 @@ begin
     'earliest', today + rest.bulk_lead_days, 'latest', today + 90,
     'slots', (select coalesce(jsonb_agg(trim(x)) filter (where trim(x) <> ''), '[]'::jsonb) from unnest(string_to_array(rest.bulk_slots, ',')) x),
     'booked', booked,
-    'items', (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', b.id, 'name', b.name, 'description', b.description, 'price', b.price,
+    'items', (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', b.id, 'name', b.name, 'diet', b.diet, 'description', b.description, 'price', b.price,
                 'min_qty', coalesce(b.min_qty, rest.bulk_min_qty), 'tiers', b.tiers, 'image_url', b.image_url)) order by b.sort_order, b.name), '[]'::jsonb)
                 from public.bulk_items b where b.restaurant_id = rest.id and b.is_active));
 end $$;
@@ -1372,3 +1372,16 @@ begin
 end $$;
 revoke all on function public.place_bulk_order(text, text, text, text, text, text, jsonb, date, text, int, text, text) from public;
 grant execute on function public.place_bulk_order(text, text, text, text, text, text, jsonb, date, text, int, text, text) to anon, authenticated;
+
+-- ============================================================
+-- 14. Veg / non-veg
+-- ============================================================
+alter table public.recipes add column if not exists diet text;
+alter table public.bulk_items add column if not exists diet text;
+alter table public.recipes drop constraint if exists recipes_diet_check;
+alter table public.recipes add constraint recipes_diet_check check (diet is null or diet in ('veg', 'nonveg'));
+alter table public.bulk_items drop constraint if exists bulk_items_diet_check;
+alter table public.bulk_items add constraint bulk_items_diet_check check (diet is null or diet in ('veg', 'nonveg'));
+-- First time only: a guess from the dish name. Staff can change it for any dish.
+update public.recipes set diet = case when lower(name) ~ '(chicken|mutton|egg|fish|prawn|keema|lamb|beef|pork|crab|seafood|meat)' then 'nonveg' else 'veg' end where diet is null;
+update public.bulk_items set diet = case when lower(name) ~ '(chicken|mutton|egg|fish|prawn|keema|lamb|beef|pork|crab|seafood|meat)' then 'nonveg' else 'veg' end where diet is null;

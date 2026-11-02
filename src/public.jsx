@@ -20,6 +20,8 @@ function Ico({ n, size = 22 }) {
 
 // last order reference: one per restaurant (so a restaurant page only ever shows its own order) plus one overall for the home page
 const readSaved = (slug) => { try { return localStorage.getItem(slug ? `last-order-ref:${slug}` : 'last-order-ref') || '' } catch { return '' } }
+// background checks pause while the phone screen is off or the tab is hidden
+const everyVisible = (fn, ms) => setInterval(() => { if (!document.hidden) fn() }, ms)
 const bulkAgain = (slug, items) => { try { sessionStorage.setItem('bulk-reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/bulk` }
 const orderAgain = (slug, items) => { try { sessionStorage.setItem('reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/order` }
 const itemText = (items) => (items || []).map(i => /^\d+\s*×/.test(i.name || '') ? i.name : `${i.quantity}× ${i.name}${i.options ? ` (${i.options})` : ''}`).join(', ')
@@ -143,7 +145,7 @@ export function TrackOrder({ initialRef, compact, slug }) {
   useEffect(() => { if (initialRef) { setCode(initialRef); lookup(initialRef) } }, [initialRef])
   useEffect(() => {
     if (!active || ['Delivered', 'Cancelled'].includes(result?.status)) return
-    const timer = setInterval(() => lookup(active, true), result?.payment_status === 'pending' ? 5000 : 15000)
+    const timer = everyVisible(() => lookup(active, true), result?.payment_status === 'pending' ? 5000 : 15000)
     return () => clearInterval(timer)
   }, [active, result?.status, result?.payment_status])
   // A UPI order starts with its payment: "Payment confirmation pending" comes first, then the kitchen steps.
@@ -199,7 +201,8 @@ function OrderPage({ r, list }) {
   const [hasSaved, setHasSaved] = useState(Boolean(saved.phone))
   const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [payment, setPayment] = useState(PAYMENTS[0]), [notes, setNotes] = useState('')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [placed, setPlaced] = useState(null), [dialog, setDialog] = useState(false)
-  const [dishQ, setDishQ] = useState(''), [editDetails, setEditDetails] = useState(false), [activeOrder, setActiveOrder] = useState(null)
+  // saved delivery details older than 7 days open in full, so the customer looks at them again
+  const [dishQ, setDishQ] = useState(''), [diet, setDiet] = useState('all'), [editDetails, setEditDetails] = useState(() => !(saved.at && Date.now() - saved.at < 7 * 864e5)), [activeOrder, setActiveOrder] = useState(null)
   const [tab, setTab] = useState(() => { try { return new URLSearchParams(window.location.search).get('tab') === 'orders' ? 'orders' : 'menu' } catch { return 'menu' } })   // 'menu' = add to cart and order, 'orders' = sign in with a phone number, see and track orders
   const [custPhone, setCustPhone] = useState(() => { try { const v = digits10((JSON.parse(localStorage.getItem('customer-details') || '{}') || {}).phone); return /^[6-9]\d{9}$/.test(v) ? v : '' } catch { return '' } })   // logged in by phone number alone
   useEffect(() => { if (custPhone) setPhone(cur => cur || custPhone) }, [custPhone])   // the order form uses the number you signed in with
@@ -207,7 +210,7 @@ function OrderPage({ r, list }) {
     if (!custPhone || !supabase) return setActiveOrder(null)
     let alive = true
     const look = async () => { const { data } = await supabase.rpc('track_orders_by_phone', { p_phone: custPhone, p_limit: 3, p_offset: 0, p_restaurant: r.slug }); if (!alive || !data) return; setActiveOrder((data.orders || []).find(o => o.status !== 'Delivered' && o.status !== 'Cancelled') || null) }
-    look(); const t = setInterval(look, 10000)
+    look(); const t = everyVisible(look, 10000)
     return () => { alive = false; clearInterval(t) }
   }, [custPhone, placed && placed.ref])
   const [copied, setCopied] = useState(false), [forcedClosed, setForcedClosed] = useState('')
@@ -224,7 +227,7 @@ function OrderPage({ r, list }) {
     if (!isOpen) return
     if (!supabase || !r.id) { setMenu([]); setMenuError('The menu is not available yet.'); return }
     setMenu(null); setMenuError('')
-    supabase.from('recipes').select('id,name,selling_price,category,sold_out_date,image_url,daily_limit,half_plate').eq('restaurant_id', r.id).eq('is_published', true).order('name').then(async ({ data, error: err }) => {
+    supabase.from('recipes').select('id,name,selling_price,category,sold_out_date,image_url,daily_limit,half_plate,diet').eq('restaurant_id', r.id).eq('is_published', true).order('name').then(async ({ data, error: err }) => {
       if (err) { setMenuError(`Could not load the menu: ${err.message}`); setMenu([]); return }
       const rows = data || []
       let by = {}
@@ -276,7 +279,7 @@ function OrderPage({ r, list }) {
   const distance = r.charge_mode === 'distance'   // the kitchen adds the delivery charge after the order is placed
   const fee = picked.length && !distance ? (freeAbove != null && total >= freeAbove ? 0 : feeBase) : 0
   const payable = total - discount + fee
-  const groups = Object.entries(dishes.filter(d => !dishQ.trim() || String(d.name).toLowerCase().includes(dishQ.trim().toLowerCase())).reduce((acc, d) => { (acc[d.category || 'Menu'] ||= []).push(d); return acc }, {}))
+  const groups = Object.entries(dishes.filter(d => (diet === 'all' || d.diet === diet) && (!dishQ.trim() || String(d.name).toLowerCase().includes(dishQ.trim().toLowerCase()))).reduce((acc, d) => { (acc[d.category || 'Menu'] ||= []).push(d); return acc }, {}))
   const step = (key, delta) => {
     const d = dishes.find(x => x.id === key.split('|')[0])
     if (delta > 0 && d && !canAdd(d)) return
@@ -312,7 +315,7 @@ function OrderPage({ r, list }) {
   useEffect(() => { if (coupon) checkCoupon(coupon.code, total, true) }, [total])   // the discount follows the cart
   useEffect(() => {   // after a UPI order: ask every few seconds whether the kitchen has confirmed the payment
     if (!payState || payState.status !== 'pending' || !supabase) return
-    const timer = setInterval(async () => {
+    const timer = everyVisible(async () => {
       const { data } = await supabase.rpc('track_order', { p_order_number: payState.ref })
       if (!data) return
       if (data.status === 'Cancelled') setPayState(null)
@@ -323,7 +326,7 @@ function OrderPage({ r, list }) {
   }, [payState && payState.ref, payState && payState.status])
   useEffect(() => {   // the kitchen sets the delivery charge: pick it up within a few seconds
     if (!feeState || feeState.status !== 'pending' || !supabase) return
-    const timer = setInterval(async () => {
+    const timer = everyVisible(async () => {
       const { data } = await supabase.rpc('track_order', { p_order_number: feeState.ref })
       if (!data) return
       if (data.status === 'Cancelled') return setFeeState(null)
@@ -366,7 +369,7 @@ function OrderPage({ r, list }) {
     setPayState(payment === 'UPI' ? { ref, status: 'pending', claimed: false, reason: '' } : null)
     setFeeState(data.delivery_fee_pending ? { ref, status: 'pending' } : null)
     try { localStorage.setItem('last-order-ref', ref); localStorage.setItem(`last-order-ref:${r.slug}`, ref) } catch { /* optional */ }
-    try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim() })); setHasSaved(true) } catch { /* optional */ }
+    try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim(), at: Date.now() })); setHasSaved(true) } catch { /* optional */ }
     setQty({}); setNotes(''); setCoupon(null); setCouponText(''); setCouponMsg('')
   }
 
@@ -401,7 +404,7 @@ function OrderPage({ r, list }) {
             {menu === null && <p className="c-note">Loading the menu…</p>}
             {menuError && <p className="c-note c-note-bad">{menuError}</p>}
             {menu && !menu.length && !menuError && <p className="c-note">No dishes are on today's menu yet. Please check back soon.</p>}
-            {menu && menu.length > 0 && <div className="c-cats">{menu.length > 15 && <input className="c-input c-dish-search" type="search" aria-label="Search dishes" placeholder="Search dishes" value={dishQ} onChange={e => setDishQ(e.target.value)} />}{groups.length > 1 && <div className="c-chips c-cat-chips" role="navigation" aria-label="Menu sections">{groups.map(([category]) => <button type="button" key={category} className="c-chip" onClick={() => { const el = document.getElementById('cat-' + category.replace(/\s+/g, '-')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>{category}</button>)}</div>}</div>}
+            {menu && menu.length > 0 && <div className="c-cats">{menu.some(d => d.diet) && <DietChips value={diet} onChange={setDiet} />}{menu.length > 15 && <input className="c-input c-dish-search" type="search" aria-label="Search dishes" placeholder="Search dishes" value={dishQ} onChange={e => setDishQ(e.target.value)} />}{groups.length > 1 && <div className="c-chips c-cat-chips" role="navigation" aria-label="Menu sections">{groups.map(([category]) => <button type="button" key={category} className="c-chip" onClick={() => { const el = document.getElementById('cat-' + category.replace(/\s+/g, '-')); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}>{category}</button>)}</div>}</div>}
             {groups.map(([category, items]) => <section key={category} id={'cat-' + category.replace(/\s+/g, '-')}>
               <h2 className="c-h2 c-cat">{category}</h2>
               <ul className="c-menu">{items.map(d => {
@@ -410,7 +413,7 @@ function OrderPage({ r, list }) {
                 const sub = picked.filter(l => l.dish.id === d.id && hasOpts)
                 return <li key={d.id} className={n || sub.length ? 'c-dish on' : out ? 'c-dish sold' : 'c-dish'}>
                   {d.image_url ? <img className="c-dish-photo" src={d.image_url} alt="" loading="lazy" width="160" height="120" /> : <div className="c-dish-photo c-dish-ph" aria-hidden="true"><span>{(d.name || '?').trim().charAt(0).toUpperCase()}</span></div>}
-                  <div className="c-dish-main"><span className="c-dish-name">{d.name}</span><span className="c-dish-price">{hasHalf(d) ? `Full ${money(d.selling_price)} · Half ${money(halfPrice(d))}` : <>{hasOpts ? 'from ' : ''}{money(d.selling_price)}</>}</span>{soldOut(d) ? <span className="c-soldout">Sold out today</span> : left === 0 ? <span className="c-soldout">Sold out for this day</span> : left != null && left <= 5 ? <span className="c-left">Only {left} left</span> : null}</div>
+                  <div className="c-dish-main"><span className="c-dish-name"><DietDot diet={d.diet} />{d.name}</span><span className="c-dish-price">{hasHalf(d) ? `Full ${money(d.selling_price)} · Half ${money(halfPrice(d))}` : <>{hasOpts ? 'from ' : ''}{money(d.selling_price)}</>}</span>{soldOut(d) ? <span className="c-soldout">Sold out today</span> : left === 0 ? <span className="c-soldout">Sold out for this day</span> : left != null && left <= 5 ? <span className="c-left">Only {left} left</span> : null}</div>
                   <div className="c-qty">{out ? null : (n === 0 || hasOpts)
                     ? <button type="button" className="c-add" onClick={() => addDish(d)} aria-label={`Add ${d.name}`} disabled={!canAdd(d)}>Add</button>
                     : <><button type="button" className="c-step" onClick={() => step(d.id, -1)} aria-label={`Remove one ${d.name}`}><Ico n="minus" size={18} /></button><output key={n} className="c-n c-bump" aria-label={`${d.name} quantity`}>{n}</output><button type="button" className="c-step" onClick={() => step(d.id, 1)} aria-label={`Add one more ${d.name}`}><Ico n="plus" size={18} /></button></>}
@@ -427,7 +430,7 @@ function OrderPage({ r, list }) {
             {days && days.length > 0 && <div className="c-days" role="radiogroup" aria-label="Delivery day">{days.map(d => { const p = dayParts(d, today); return <label key={d} className={deliveryDate === d ? 'c-day on' : 'c-day'}><input type="radio" name="delivery-day" value={d} checked={deliveryDate === d} onChange={() => setDeliveryDate(d)} /><b>{p.top}</b><span>{p.bottom}</span></label> })}</div>}
 
             <h2 className="c-h2 c-cat">Delivery details</h2>
-            {hasSaved && !editDetails && name.trim() && address.trim() && digits10(phone).length === 10 && <div className="c-deliv-sum"><span>Delivering to <b>{(address.split(',').map(x => x.trim()).filter(Boolean).slice(-2)[0]) || address}</b> · {name.trim().split(' ')[0]} · {digits10(phone).slice(-4).padStart(10, '•')}</span><button type="button" className="c-linkbtn" onClick={() => setEditDetails(true)}>Change</button></div>}
+            {hasSaved && !editDetails && name.trim() && address.trim() && digits10(phone).length === 10 && <div className="c-deliv-sum"><div className="c-deliv-sum-body"><b>Delivering to</b><span className="c-deliv-addr">{address.trim()}</span><small>{name.trim()} · {digits10(phone)}</small></div><button type="button" className="c-linkbtn" onClick={() => setEditDetails(true)}>Change</button></div>}
             <div hidden={hasSaved && !editDetails && Boolean(name.trim() && address.trim() && digits10(phone).length === 10)}>
             {hasSaved && <p className="c-saved">Filled in from your last order. <button type="button" className="c-linkbtn" onClick={() => { try { localStorage.removeItem('customer-details') } catch { /* ignore */ } setName(''); setPhone(''); setAddress(''); setHasSaved(false) }}>Not you? Clear</button></p>}
             <label className="c-field"><span>Name</span><input className="c-input" required autoComplete="name" value={name} onChange={e => setName(e.target.value)} /></label>
@@ -458,6 +461,7 @@ function OrderPage({ r, list }) {
 
     {sheet && <OptionSheet dish={sheet} options={optsOf(sheet)} halfPrice={hasHalf(sheet) ? halfPrice(sheet) : null} onClose={() => setSheet(null)} onAdd={(ids) => { step(`${sheet.id}|${ids.slice().sort().join('+')}`, 1); setSheet(null) }} />}
     {isOpen && tab === 'menu' && count > 0 && <div className="c-cart">
+      {address.trim() && <div className="c-cart-to">Delivering to <b>{address.trim()}</b></div>}
       <div className="c-cart-sum"><b>{count} item{count === 1 ? '' : 's'}</b><span key={payable} className="c-bump">{discount > 0 && <s className="c-was">{money(total)}</s>} {money(payable)}</span></div>
       <button form="order-form" className="c-cta c-cta-accent customer-submit" disabled={sending || !deliveryDate || belowMin}>{belowMin ? `Add ${money(minOrder - total)} more` : sending ? 'Placing order…' : 'Place order'}</button>
     </div>}
@@ -585,13 +589,13 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
   useEffect(() => { setRes(null); loadList() }, [phone, page, refresh])
   useEffect(() => {
     if (!phone || !supabase) return
-    const t = setInterval(() => { if (!res || (res.orders || []).some(o => !FINAL.includes(o.status))) loadList() }, 5000)
+    const t = everyVisible(() => { if (!res || (res.orders || []).some(o => !FINAL.includes(o.status))) loadList() }, 5000)
     return () => clearInterval(t)
   }, [phone, page, res])
   useEffect(() => { setDetail(null); loadDetail() }, [sel])
   useEffect(() => {
     if (!sel || !supabase) return
-    const t = setInterval(loadDetail, 5000)
+    const t = everyVisible(loadDetail, 5000)
     const k = (e) => { if (e.key === 'Escape') setSel('') }
     document.addEventListener('keydown', k)
     return () => { clearInterval(t); document.removeEventListener('keydown', k) }
@@ -659,12 +663,16 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
   </section>
 }
 
+const DietDot = ({ diet }) => diet ? <i className={diet === 'veg' ? 'c-diet-dot veg' : 'c-diet-dot nonveg'} title={diet === 'veg' ? 'Veg' : 'Non-veg'} aria-label={diet === 'veg' ? 'Veg' : 'Non-veg'} /> : null
+function DietChips({ value, onChange }) {
+  return <div className="c-chips c-diet-chips" role="radiogroup" aria-label="Veg or non-veg">{[['all', 'All'], ['veg', 'Veg'], ['nonveg', 'Non-veg']].map(([k, label]) => <button type="button" key={k} role="radio" aria-checked={value === k} aria-label={label} title={label} className={(value === k ? 'c-chip on' : 'c-chip') + (k === 'all' ? '' : ' sym')} onClick={() => onChange(k)}>{k === 'all' ? 'All' : <i className={k === 'veg' ? 'c-diet-dot veg' : 'c-diet-dot nonveg'} aria-hidden="true" />}</button>)}</div>
+}
 /* ---------- Order in bulk: its own page and flow, separate from the normal menu ---------- */
 const bulkPrice = (item, q) => { const t = (item.tiers || []).filter(x => Number(x.qty) <= q).sort((a, b) => Number(b.qty) - Number(a.qty))[0]; return t ? Number(t.price) : Number(item.price) }
 function BulkOrderPage({ r, list }) {
   usePageBrand(r, `Order in bulk · ${r.name}`)
   const saved = (() => { try { return JSON.parse(localStorage.getItem('customer-details') || '{}') || {} } catch { return {} } })()
-  const [menu, setMenu] = useState(null), [qty, setQty] = useState({}), [date, setDate] = useState(''), [slot, setSlot] = useState(''), [guests, setGuests] = useState(''), [spice, setSpice] = useState('')
+  const [menu, setMenu] = useState(null), [qty, setQty] = useState({}), [date, setDate] = useState(''), [slot, setSlot] = useState(''), [guests, setGuests] = useState(''), [spice, setSpice] = useState(''), [diet, setDiet] = useState('all')
   const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [notes, setNotes] = useState(''), [payment, setPayment] = useState('Cash on delivery')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [done, setDone] = useState(null), [copied, setCopied] = useState(false), [claimed, setClaimed] = useState(false)
   useEffect(() => {
@@ -677,8 +685,9 @@ function BulkOrderPage({ r, list }) {
       } catch { /* optional */ }
     })
   }, [r.slug])
-  const items = menu ? menu.items || [] : []
-  const lines = items.filter(i => qty[i.id] > 0).map(i => ({ item: i, q: Number(qty[i.id]), unit: bulkPrice(i, Number(qty[i.id])) }))
+  const allItems = menu ? menu.items || [] : []
+  const items = allItems.filter(i => diet === 'all' || i.diet === diet)
+  const lines = allItems.filter(i => qty[i.id] > 0).map(i => ({ item: i, q: Number(qty[i.id]), unit: bulkPrice(i, Number(qty[i.id])) }))
   const plates = lines.reduce((s, l) => s + l.q, 0), subtotal = lines.reduce((s, l) => s + l.q * l.unit, 0)
   const distance = r.charge_mode === 'distance'
   const feeBase = Number(r.delivery_fee || 0), freeAbove = r.free_delivery_above ? Number(r.free_delivery_above) : null
@@ -700,7 +709,7 @@ function BulkOrderPage({ r, list }) {
     const { data, error: err } = await supabase.rpc('place_bulk_order', { p_restaurant: r.slug, p_name: name.trim(), p_phone: phone.trim(), p_address: address.trim(), p_payment: payment, p_notes: notes.trim(), p_items: lines.map(l => ({ item_id: l.item.id, quantity: l.q })), p_delivery_date: date, p_slot: slot || null, p_guests: guests ? Number(guests) : null, p_spice: spice || null, p_packing: null })
     setSending(false)
     if (err) { const known = /^(BULK_[A-Z]+|INVALID_PHONE|RATE_LIMIT|UPI_OFF|RESTAURANT_CLOSED):/.test(err.message.replace(/^.*?(?=[A-Z_]+:)/, '')); return setError(known ? err.message.replace(/^.*?([A-Z_]+):\s*/, '') : `Could not place your order: ${err.message}`) }
-    try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim() })) } catch { /* optional */ }
+    try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim(), at: Date.now() })) } catch { /* optional */ }
     setDone(data)
   }
   const rest = { ...r }
@@ -709,15 +718,17 @@ function BulkOrderPage({ r, list }) {
     <header className="c-bar"><a className="c-back" href={`/${r.slug}`} aria-label={`Back to ${r.name}`}><Ico n="back" /></a><Mark r={r} size={34} className="c-bar-mark" /><p className="c-bar-meta">Bulk orders · {r.name}</p></header>
     <div className="c-page">
       <h1 className="c-h1">Order in bulk</h1>
+      <a className="c-bulk-promo c-solo-promo" href={`/${r.slug}/order`}><span className="c-bulk-promo-text"><b>Ordering just for yourself?</b><small>Use the regular menu. Click here.</small></span><span aria-hidden="true" className="c-bulk-promo-go">›</span></a>
       {menu === null && <p className="c-note">Loading…</p>}
       {menu && !menu.enabled && <div className="c-note c-note-bad" role="status">Bulk orders are not open right now. <a className="c-linkbtn" href={`/${r.slug}/order`}>Order from the normal menu</a></div>}
       {menu && menu.enabled && <form id="bulk-form" onSubmit={submit}>
         <p className="c-sub c-bulk-rules">Minimum {menu.min_qty} plates per item · at least {menu.lead_days} day{menu.lead_days === 1 ? '' : 's'} ahead{pct > 0 ? ` · ${pct}% advance` : ''}{cap != null ? ` · up to ${cap} plates a day` : ''}</p>
         {menu.note && <p className="c-note c-bulk-note">{menu.note}</p>}
         {!items.length && <p className="c-note">The bulk menu is empty. Please check back soon.</p>}
+        {allItems.some(i => i.diet) && <DietChips value={diet} onChange={setDiet} />}
         <ul className="c-menu c-bulk-menu">{items.map(i => { const q = qty[i.id] || 0, min = Number(i.min_qty || 1); return <li key={i.id} className={q > 0 ? 'c-dish on' : 'c-dish'}>
           {i.image_url ? <img className="c-dish-photo" src={i.image_url} alt="" loading="lazy" width="160" height="120" /> : <div className="c-dish-photo c-dish-ph" aria-hidden="true"><span>{(i.name || '?').trim().charAt(0).toUpperCase()}</span></div>}
-          <div className="c-dish-main"><span className="c-dish-name">{i.name}</span>{i.description && <span className="c-dish-price">{i.description}</span>}
+          <div className="c-dish-main"><span className="c-dish-name"><DietDot diet={i.diet} />{i.name}</span>{i.description && <span className="c-dish-price">{i.description}</span>}
             <span className="c-dish-price">{money(i.price)} per plate · min {min}</span>
             {(i.tiers || []).length > 0 && <span className="c-bulk-tiers">{(i.tiers || []).map(t => `${money(t.price)} from ${t.qty}`).join(' · ')}</span>}</div>
           <div className="c-qty c-bulk-qty">{q === 0 ? <button type="button" className="c-add" onClick={() => setQ(i.id, min)} aria-label={`Add ${i.name}`}>Add {min}</button>
@@ -749,7 +760,8 @@ function BulkOrderPage({ r, list }) {
         {error && <p className="c-note c-note-bad" role="alert">{error}</p>}
       </form>}
     </div>
-    {menu && menu.enabled && lines.length > 0 && !done && <div className="c-cart"><div className="c-cart-sum"><b>{plates} plates</b><span>{money(total)}</span></div>
+    {menu && menu.enabled && lines.length > 0 && !done && <div className="c-cart">
+      {address.trim() && <div className="c-cart-to">Delivering to <b>{address.trim()}</b></div>}<div className="c-cart-sum"><b>{plates} plates</b><span>{money(total)}</span></div>
       <button form="bulk-form" className="c-cta c-cta-accent bulk-submit" disabled={sending || tooMany}>{sending ? 'Placing order…' : 'Place bulk order'}</button></div>}
     {done && <div className="c-dialog-wrap"><div className="c-dialog c-bulk-done" role="dialog" aria-modal="true" aria-label="Bulk order placed">
       <img className="c-logo c-dlg-logo" src={logoFor(r.slug)} alt={`${r.name} logo`} width="64" height="64" />
