@@ -529,3 +529,13 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-stars button{flex:1 1 0;min-width:0;width:auto;max-width:56px;height:46px}
 .c-app .c-mine-dialog .c-steps{text-align:left}
 .c-app .c-mine-dialog .c-track-note,.c-app .c-mine-dialog .c-track .c-sub{text-align:center}
+
+/* Bulk orders */
+.c-app .c-bulk-tag{display:inline-block;margin-left:8px;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--c-accent-solid) 20%,transparent);font-size:12px;font-style:normal;font-weight:800;letter-spacing:.03em;text-transform:uppercase}
+.c-app .c-bulk-meta{margin:6px 0;font-size:14px}
+.c-app .c-bulk-rules{margin:0 0 10px}
+.c-app .c-bulk-note{margin:0 0 14px}
+.c-app .c-bulk-tiers{font-size:13px;color:var(--c-muted)}
+.c-app .c-bulk-qty{justify-content:center;gap:6px}
+.c-app .c-bulk-n{width:64px;min-height:44px;border:1.5px solid var(--c-line);border-radius:12px;text-align:center;font:inherit;font-weight:700;background:var(--c-surface);color:var(--c-ink)}
+.c-app .landing-bulk{margin-top:10px}

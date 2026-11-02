@@ -57,7 +57,7 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear, o
       return <article key={a.key} className="oa-card" style={themeStyle(r && r.slug)}>
         <header className="oa-head">
           {r ? <Mark r={r} size={30} /> : <span />}
-          <span className="oa-new">New order{r ? ` · ${r.name}` : ''}</span>
+          <span className="oa-new">{o.kind === 'bulk' ? 'New BULK order' : 'New order'}{r ? ` · ${r.name}` : ''}</span>
           <button type="button" className="oa-x" aria-label="Dismiss" onClick={() => onDismiss(a.key)}>×</button>
         </header>
         <div className="oa-ref"><b>{o.id}</b><span>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
@@ -156,6 +156,8 @@ export function RestaurantSettings({ r, secrets, onSave }) {
       </div>
       {(!prepOk || !cancelOk) && <p className="rset-warn" role="alert">Preparation time: 5 to 480 minutes. Cancel after: 5 to 1440 minutes.</p>}
       <label className="rset-check rset-lowstock"><input type="checkbox" aria-label="Low-stock alerts" checked={f.lowStock} onChange={e => set({ lowStock: e.target.checked })} />Alert me when an ingredient runs low <small>A notification once when stock falls to its reorder level. {r.name} only.</small></label>
+      <div className="rset-switch"><div><b>Accept UPI payments</b><small>{r.upi_enabled === false ? 'UPI is off. Customers can only choose cash on delivery.' : 'Customers can pay by UPI. Switch off if UPI is down; orders already placed are not affected.'}</small></div>
+        <button type="button" role="switch" aria-checked={r.upi_enabled !== false} aria-label="Accept UPI payments" className={r.upi_enabled === false ? 'switch' : 'switch on ok'} onClick={() => onSave({ upi_enabled: r.upi_enabled === false })}><i/></button></div>
       <label className="rset-field">UPI ID for {r.name}
         <input value={f.upi} onChange={e => set({ upi: e.target.value })} placeholder="e.g. saltsaffron@okaxis" autoCapitalize="none" autoCorrect="off" spellCheck="false" aria-label="UPI ID" aria-invalid={!upiOk} />
         <small>Customers who choose UPI get a "Pay with UPI" button for this ID. Leave empty to hide it. Each restaurant has its own.</small></label>

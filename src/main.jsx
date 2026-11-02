@@ -42,7 +42,7 @@ function analyse(orders, recipes) {
   const count = list.length
   return { sales, count, aov: count ? Math.round(sales / count) : 0, cost, profit: sales - cost, foodPct: sales ? Math.round(cost / sales * 1000) / 10 : 0, dishes: Object.values(dishes).sort((a, b) => b.qty - a.qty) }
 }
-const mapOrder = (o) => ({ id:o.order_number, restaurantId:o.restaurant_id, deliveryDate:o.delivery_date, cancelReason:o.cancel_reason || '', paymentStatus:o.payment_status || 'not_required', deliveryFee:Number(o.delivery_fee || 0), deliveryFeePending:Boolean(o.delivery_fee_pending), rating:o.rating || 0, ratingComment:o.rating_comment || '', paymentClaimedAt:o.payment_claimed_at || '', paymentTxn:o.payment_txn_id || '', paymentRejectReason:o.payment_reject_reason || '', phone:o.customer_phone || '', customer:o.customer_name || 'Walk-in guest', channel:o.channel, total:Number(o.total), time:new Date(o.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), status:o.status, items:o.items || [], address:o.delivery_address || '', payment:o.payment_method || '', placed:new Date(o.created_at).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }), createdAt:o.created_at, avatar:(o.customer_name || 'WG').split(' ').map(x=>x[0]).join('').slice(0,2) })
+const mapOrder = (o) => ({ kind:o.kind || 'normal', bulk:o.bulk || null, id:o.order_number, restaurantId:o.restaurant_id, deliveryDate:o.delivery_date, cancelReason:o.cancel_reason || '', paymentStatus:o.payment_status || 'not_required', deliveryFee:Number(o.delivery_fee || 0), deliveryFeePending:Boolean(o.delivery_fee_pending), rating:o.rating || 0, ratingComment:o.rating_comment || '', paymentClaimedAt:o.payment_claimed_at || '', paymentTxn:o.payment_txn_id || '', paymentRejectReason:o.payment_reject_reason || '', phone:o.customer_phone || '', customer:o.customer_name || 'Walk-in guest', channel:o.channel, total:Number(o.total), time:new Date(o.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), status:o.status, items:o.items || [], address:o.delivery_address || '', payment:o.payment_method || '', placed:new Date(o.created_at).toLocaleString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }), createdAt:o.created_at, avatar:(o.customer_name || 'WG').split(' ').map(x=>x[0]).join('').slice(0,2) })
 // Orders are listed by delivery date: today and later first (soonest first), then earlier days (most recent first)
 const deliveryKey = (o) => o.deliveryDate || (o.createdAt ? o.createdAt.slice(0, 10) : '')
 // Every admin list: the order placed most recently is on top, whatever its status or delivery day
@@ -255,9 +255,9 @@ function App() {
     if (alertedRef.current.has(order.id)) return
     alertedRef.current.add(order.id)
     setAlerts(a => [{ key: order.id + '-' + Date.now(), restaurantId: rest.id, order, lines: orderLines(order), today: zonedNow(rest.timezone || 'Asia/Kolkata').date }, ...a].slice(0, 8))
-    if (soundRef.current) playBeep()
-    systemNotify(order, rest.name)
-    if (document.hidden) document.title = `🔔 New order · ${rest.name}`
+    if (soundRef.current) { playBeep(); if (order.kind === 'bulk') { setTimeout(playBeep, 400); setTimeout(playBeep, 800) } }   // bulk orders: a triple beep
+    systemNotify(order, rest.name, order.kind === 'bulk' ? 'New BULK order' : 'New order')
+    if (document.hidden) document.title = `🔔 New ${order.kind === 'bulk' ? 'BULK ' : ''}order · ${rest.name}`
   }
   // A customer pressed "I've paid": a UPI payment waits for staff to verify. Sound + popup, for either restaurant.
   const raiseVerify = (order, rest) => {
@@ -273,7 +273,7 @@ function App() {
   const catchUpOthers = async (activeId) => {   // orders for the other restaurant that arrived while we were away or offline
     if (!supabase) return
     const since = new Date(lastSeenRef.current - 120000).toISOString()
-    const { data, error } = await supabase.from('orders').select('*').eq('channel', 'Customer form').eq('status', 'New').gt('created_at', since)
+    const { data, error } = await supabase.from('orders').select('*').in('channel', ['Customer form', 'Bulk order']).eq('status', 'New').gt('created_at', since)
     if (error || !data) return
     data.filter(o => o.restaurant_id !== activeId).forEach(o => { const rest = restaurantsRef.current.find(x => x.id === o.restaurant_id); if (rest) raiseAlert(mapOrder(o), rest) })
     const claims = await supabase.from('orders').select('*').eq('payment_status', 'pending').gt('payment_claimed_at', since)   // payments claimed while we were away, either restaurant
@@ -299,7 +299,7 @@ function App() {
         const mapped = (ordersResult.data || []).map(mapOrder)
         const prev = knownRef.current
         if (prev && prev.restaurantId === rid) {   // a reload after being away or offline: alert for customer orders we have not seen yet
-          const fresh = mapped.filter(o => !prev.ids.has(o.id) && o.channel === 'Customer form' && o.status === 'New')
+          const fresh = mapped.filter(o => !prev.ids.has(o.id) && ['Customer form', 'Bulk order'].includes(o.channel) && o.status === 'New')
           const rest = activeRef.current
           if (rest) fresh.forEach(o => raiseAlert(o, rest))
           catchUpOthers(rid)
@@ -327,7 +327,7 @@ function App() {
         lastSeenRef.current = Date.now()
         const owner = restaurantsRef.current.find(x => x.id === o.restaurant_id)
         if (!owner) return
-        if (o.channel === 'Customer form') raiseAlert(mapped, owner)   // alerts for BOTH restaurants, whichever one is open
+        if (['Customer form', 'Bulk order'].includes(o.channel)) raiseAlert(mapped, owner)   // alerts for BOTH restaurants, whichever one is open
         const rest = activeRef.current
         if (!rest || o.restaurant_id !== rest.id) return   // the order list, badges and stock only ever show the open restaurant
         setOrders(current => current.some(x => x.id === mapped.id) ? current : [{ ...mapped, time: 'Just now' }, ...current])
@@ -350,18 +350,20 @@ function App() {
     return () => { supabase.removeChannel(channel) }
   }, [Boolean(session)])
   const formatItems = (items) => Array.isArray(items) ? items.map(item => typeof item === 'string' ? item : `${item.quantity}× ${item.name}${item.options ? ` (${item.options})` : ''}`).join(' · ') : items
-  const filtered = useMemo(() => sortByDelivery(orders.filter(o => {
+  const normalOrders = useMemo(() => orders.filter(o => o.kind !== 'bulk'), [orders])   // bulk orders have their own page
+  const bulkOrders = useMemo(() => orders.filter(o => o.kind === 'bulk'), [orders])
+  const filtered = useMemo(() => sortByDelivery(normalOrders.filter(o => {
     const textMatch = `${o.customer} ${o.id} ${o.phone || ''} ${o.address || ''} ${formatItems(o.items)}`.toLowerCase().includes(query.toLowerCase())
     const statusMatch = orderFilter === 'All orders' || o.status === orderFilter
     const channelMatch = channelFilter === 'All channels' || o.channel === channelFilter
     const dk = deliveryKey(o)
     const dateMatch = dateFilter === 'All dates' || (dateFilter === 'Today' ? dk === todayIso : dateFilter === 'Tomorrow' ? dk === addDaysIso(todayIso, 1) : dateFilter === 'Upcoming' ? dk > todayIso : dk < todayIso)
     return textMatch && statusMatch && channelMatch && dateMatch
-  }), todayIso), [orders, query, orderFilter, channelFilter, dateFilter, todayIso])
+  }), todayIso), [normalOrders, query, orderFilter, channelFilter, dateFilter, todayIso])
   const notify = (text) => { setToast(text); setTimeout(() => setToast(''), 2600) }
-  const nav = [['Overview', 'grid'], ['Orders', 'receipt'], ['Payments', 'rupee'], ['To cook', 'pot'], ['Recipes', 'book'], ['Inventory', 'boxes'], ['Customers', 'users'], ['Reports', 'chart'], ['Help', 'book']]
-  const SECONDARY = ['Recipes', 'Inventory', 'Customers', 'Reports', 'Help']   // under "More" on phones
-  const ROLE_PAGES = { cook: ['Orders', 'To cook'], delivery: ['Orders', 'Payments'], none: [] }
+  const nav = [['Overview', 'grid'], ['Orders', 'receipt'], ['Payments', 'rupee'], ['To cook', 'pot'], ['Recipes', 'book'], ['Inventory', 'boxes'], ['Customers', 'users'], ['Bulk', 'boxes'], ['Reports', 'chart'], ['Help', 'book']]
+  const SECONDARY = ['Recipes', 'Inventory', 'Customers', 'Bulk', 'Reports', 'Help']   // under "More" on phones
+  const ROLE_PAGES = { cook: ['Orders', 'To cook', 'Bulk'], delivery: ['Orders', 'Payments', 'Bulk'], none: [] }
   const isOwner = role === 'owner'   // until we know who is signed in, show nothing owner-only
   const allowed = (p) => p === 'Help' || isOwner || (ROLE_PAGES[role] || []).includes(p)
   const navItems = nav.filter(([l]) => allowed(l))
@@ -479,16 +481,21 @@ function App() {
   const deleteInventory = async () => { if (!window.confirm(`Delete "${editingItem.name}"?`)) return; if (supabase) { const { error } = await supabase.from('inventory_items').delete().eq('id', editingItem.id); if (error) return notify(`Could not delete ingredient: ${error.message}`) } setInventory(list => list.filter(i => i.id !== editingItem.id)); setEditingItem(null); notify('Ingredient deleted') }
   const pickRestaurant = (slug) => { setActiveSlug(slug); try { localStorage.setItem('active-restaurant', slug) } catch { /* optional */ } setModal(null); setEditingOrder(null); setEditingRecipe(null); setEditingItem(null); setCloseDialog(null); setQuery(''); setChannelFilter('All channels'); setDateFilter('All dates'); setHighlight('') }
   const setOpen = async (open, message) => { if (supabase) { const { error } = await supabase.from('restaurants').update({ is_open: open, closed_message: open ? null : (message || null) }).eq('id', active.id); if (error) return notify(`Could not update ${active.name}: ${error.message}`) } setRestaurants(list => list.map(r => r.id === active.id ? { ...r, is_open: open, closed_message: open ? null : (message || null) } : r)); notify(`${active.name} is now ${open ? 'open' : 'closed'}`) }
+  const markAdvance = async (o) => {   // staff received the advance (cash or UPI)
+    const bulk = { ...(o.bulk || {}), advance_received: !(o.bulk && o.bulk.advance_received) }
+    if (supabase) { const { error } = await supabase.from('orders').update({ bulk }).eq('order_number', o.id); if (error) return notify(`Could not update: ${error.message}`) }
+    setOrders(list => list.map(x => x.id === o.id ? { ...x, bulk } : x)); notify(bulk.advance_received ? `Advance received for ${o.id}` : `Advance undone for ${o.id}`)
+  }
   const saveRestaurantSettings = async (fields, secretFields) => { if (supabase) { const { error } = await supabase.from('restaurants').update(fields).eq('id', active.id); if (error) return notify(`Could not save settings: ${error.message}`); if (secretFields) { const { error: secretError } = await supabase.from('restaurant_secrets').upsert({ restaurant_id: active.id, ...secretFields }); if (secretError) return notify(`Saved, but phone alerts failed: ${secretError.message}`); setSecrets(secretFields) } } setRestaurants(list => list.map(r => r.id === active.id ? { ...r, ...fields } : r)); notify(`Settings saved for ${active.name}`) }
   const saveLimits = async (fields) => { if (supabase) { const { error } = await supabase.from('order_limits').upsert({ id: true, ...fields }); if (error) return notify(`Could not save the order limits: ${error.message}`) } setLimits(l => ({ ...l, ...fields })); notify('Order limits saved') }
   const toggleOpen = () => active.is_open ? setCloseDialog({ message: '' }) : setOpen(true)
   const dismissAlert = (key) => setAlerts(a => a.filter(x => x.key !== key))
   const viewAlert = (a) => { const r = restaurants.find(x => x.id === a.restaurantId); if (r && (!active || r.id !== active.id)) pickRestaurant(r.slug); setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
   ticketBrand.name = active ? active.name : ''
-  const todayOrders = orders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = orders.filter(o => daysAgo(o.createdAt, 1))
+  const todayOrders = normalOrders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = normalOrders.filter(o => daysAgo(o.createdAt, 1))
   const today = analyse(todayOrders, recipeList), yesterday = analyse(yesterdayOrders, recipeList)
   const pct = (a, b) => b ? `${a >= b ? '↑' : '↓'} ${Math.abs(Math.round((a - b) / b * 100))}%` : 'New'
-  const activeCount = orders.filter(o => ['New', 'Cooking', 'Ready'].includes(o.status)).length
+  const activeCount = normalOrders.filter(o => ['New', 'Cooking', 'Ready'].includes(o.status)).length
   const lowStock = inventory.filter(i => i.stock <= i.reorder)
   const deliveredToday = todayOrders.filter(o => o.status === 'Delivered').length
   const progressPct = todayOrders.length ? Math.round(deliveredToday / todayOrders.length * 100) : 0
@@ -514,9 +521,9 @@ function App() {
         {goal && <GoalCard goal={goal} onSave={saveGoal}/>}
         <NeedsAttention orders={orders} inventory={inventory} go={setPage}/>
         <section className="stats"><Stat label="Today's sales" value={`₹${today.sales.toLocaleString('en-IN')}`} change={pct(today.sales, yesterday.sales)}/><Stat label="Orders" value={today.count} change={pct(today.count, yesterday.count)}/><Stat label="Avg. order value" value={`₹${today.aov}`} change={pct(today.aov, yesterday.aov)}/><Stat label="Food cost" value={`${today.foodPct}%`} change={yesterday.sales ? `${today.foodPct <= yesterday.foodPct ? '↓' : '↑'} ${Math.abs(Math.round((today.foodPct - yesterday.foodPct) * 10) / 10)}%` : 'est.'} good={today.foodPct <= yesterday.foodPct}/></section>
-        <section className="content-grid"><div className="panel orders-panel"><div className="panel-heading"><div><h3>Live orders <span className="live-dot">●</span></h3><p>Orders requiring attention</p></div><button className="text-btn" onClick={() => setPage('Orders')}>See all <Icon name="arrow" size={15}/></button></div><OrderTable orders={sortByDelivery(orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled'), todayIso).slice(0,3)} onStatus={requestStatus} onEdit={setEditingOrder} formatItems={formatItems} highlight={highlight} today={todayIso} rname={active.name} onPay={o => setPayFor({ order: o, then: null })} onCharge={setChargeFor} distance={active.charge_mode === 'distance'}/></div><div className="panel insights"><div className="panel-heading"><div><h3>Kitchen insights</h3><p>Things worth your attention</p></div><button className="more" title="Refresh data" aria-label="Refresh data" onClick={() => { reloadRef.current && reloadRef.current(); notify('Data refreshed') }}><Icon name="more"/></button></div>{lowStock.slice(0, 2).map(i => <div className="insight amber" key={i.id}><span>⚠</span><div><b>{i.name} running low</b><p>{i.stock} {i.unit} left · reorder at {i.reorder} {i.unit}</p></div><button onClick={() => setPage('Inventory')}>View</button></div>)}{today.dishes[0] ? <div className="insight lilac"><span>↗</span><div><b>{today.dishes[0].name} is leading today</b><p>{today.dishes[0].qty} sold so far today.</p></div></div> : null}{!lowStock.length && !today.dishes[0] && <div className="insight lilac"><span>✓</span><div><b>All quiet</b><p>Stock looks healthy and no orders yet today.</p></div></div>}<div className="prep"><div><span>ORDER PROGRESS</span><b>{progressPct}% delivered</b></div><div className="progress"><i style={{ width: `${progressPct}%` }}/></div><p>{deliveredToday} of {todayOrders.length} orders today delivered</p></div></div></section>
+        <section className="content-grid"><div className="panel orders-panel"><div className="panel-heading"><div><h3>Live orders <span className="live-dot">●</span></h3><p>Orders requiring attention</p></div><button className="text-btn" onClick={() => setPage('Orders')}>See all <Icon name="arrow" size={15}/></button></div><OrderTable orders={sortByDelivery(normalOrders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled'), todayIso).slice(0,3)} onStatus={requestStatus} onEdit={setEditingOrder} formatItems={formatItems} highlight={highlight} today={todayIso} rname={active.name} onPay={o => setPayFor({ order: o, then: null })} onCharge={setChargeFor} distance={active.charge_mode === 'distance'}/></div><div className="panel insights"><div className="panel-heading"><div><h3>Kitchen insights</h3><p>Things worth your attention</p></div><button className="more" title="Refresh data" aria-label="Refresh data" onClick={() => { reloadRef.current && reloadRef.current(); notify('Data refreshed') }}><Icon name="more"/></button></div>{lowStock.slice(0, 2).map(i => <div className="insight amber" key={i.id}><span>⚠</span><div><b>{i.name} running low</b><p>{i.stock} {i.unit} left · reorder at {i.reorder} {i.unit}</p></div><button onClick={() => setPage('Inventory')}>View</button></div>)}{today.dishes[0] ? <div className="insight lilac"><span>↗</span><div><b>{today.dishes[0].name} is leading today</b><p>{today.dishes[0].qty} sold so far today.</p></div></div> : null}{!lowStock.length && !today.dishes[0] && <div className="insight lilac"><span>✓</span><div><b>All quiet</b><p>Stock looks healthy and no orders yet today.</p></div></div>}<div className="prep"><div><span>ORDER PROGRESS</span><b>{progressPct}% delivered</b></div><div className="progress"><i style={{ width: `${progressPct}%` }}/></div><p>{deliveredToday} of {todayOrders.length} orders today delivered</p></div></div></section>
         <section className="recipe-section"><div className="section-title"><div><h2>Menu intelligence</h2><p>Recipes at a glance — keep your margins healthy.</p></div><button className="text-btn" onClick={() => setPage('Recipes')}>Recipe library <Icon name="arrow" size={15}/></button></div><div className="recipe-cards">{recipeList.slice(0,3).map(r => <RecipeCard key={r.id} r={r} onClick={() => { setSelectedRecipe(r); setPage('Recipes') }}/>)}</div></section>
-      </> : page === 'Customers' ? <CustomersPage restaurant={active} notify={notify}/> : page === 'Payments' ? <PaymentsPage restaurant={active} orders={orders} onPay={o => setPayFor({ order: o, then: null })} onPaid={setCashPaid}/> : page === 'To cook' ? <PrepPage orders={orders} today={todayIso} restaurant={active.name} notify={notify}/> : page === 'Orders' ? <OrdersPage onSheet={() => setSheetOpen(true)} onCharge={setChargeFor} distance={active.charge_mode === 'distance'} statusCounts={{ all: orders.length, ...orders.reduce((m, o) => { m[o.status] = (m[o.status] || 0) + 1; return m }, {}) }} onPay={o => setPayFor({ order: o, then: null })} rname={active.name} orders={filtered} recipes={recipeList} onPublish={togglePublished} query={query} setQuery={setQuery} onStatus={requestStatus} onEdit={setEditingOrder} formatItems={formatItems} filter={orderFilter} setFilter={setOrderFilter} channelFilter={channelFilter} setChannelFilter={setChannelFilter} dateFilter={dateFilter} setDateFilter={setDateFilter} channels={[...new Set(orders.map(o => o.channel))]} highlight={highlight} slug={active.slug} today={todayIso}/> : page === 'Recipes' ? <RecipesPage onLimit={saveLimit} onHalf={toggleHalf} onAddOption={addOption} onRemoveOption={removeOption} today={todayIso} onSoldOut={toggleSoldOut} onPhoto={uploadPhoto} onRemovePhoto={removePhoto} recipes={recipeList} recipe={selectedRecipe} onSelect={setSelectedRecipe} onNew={() => setModal('recipe')} onEdit={setEditingRecipe}/> : page === 'Inventory' ? <InventoryPage inventory={inventory} onNew={() => setModal('inventory')} onEdit={setEditingItem}/> : page === 'Reports' ? <ReportsPage orders={orders} recipeList={recipeList}/> : page === 'Settings' ? <>{secrets ? <RestaurantSettings r={active} secrets={secrets} onSave={saveRestaurantSettings}/> : <p className="no-results">Loading settings…</p>}{limits && <OrderLimitsSettings limits={limits} onSave={saveLimits}/>}{isOwner && <TeamCard notify={notify}/>}<AppInstallCard notify={notify} restaurants={restaurants}/><CouponsSettings restaurants={restaurants} notify={notify}/><BackupCard restaurants={restaurants} notify={notify}/><SettingsPage key={`${active.slug}:${settings.kitchenName}:${settings.location}`} settings={settings} onSave={async (next) => { const location = (next.location || '').trim(); if (supabase) { const { error } = await supabase.from('restaurants').update({ location: location || null }).eq('id', active.id); if (error) return notify(`Could not save the location: ${error.message}`) } else setRestaurants(l => l.map(x => x.slug === active.slug ? { ...x, location } : x)); setSettings({ ...next, location }); try { localStorage.setItem(`kitchen-settings:${active.slug}`, JSON.stringify({ currency: next.currency, taxRate: next.taxRate })) } catch { /* optional */ } notify(`Kitchen profile saved for ${active.name}`) }}/></> : page === 'Help' ? <HelpPage/> : <Placeholder page={page} notify={notify}/>}</div> 
+      </> : page === 'Customers' ? <CustomersPage restaurant={active} notify={notify}/> : page === 'Payments' ? <PaymentsPage restaurant={active} orders={orders} onPay={o => setPayFor({ order: o, then: null })} onPaid={setCashPaid}/> : page === 'To cook' ? <PrepPage orders={orders} today={todayIso} restaurant={active.name} notify={notify}/> : page === 'Orders' ? <OrdersPage onSheet={() => setSheetOpen(true)} onCharge={setChargeFor} distance={active.charge_mode === 'distance'} statusCounts={{ all: normalOrders.length, ...normalOrders.reduce((m, o) => { m[o.status] = (m[o.status] || 0) + 1; return m }, {}) }} onPay={o => setPayFor({ order: o, then: null })} rname={active.name} orders={filtered} recipes={recipeList} onPublish={togglePublished} query={query} setQuery={setQuery} onStatus={requestStatus} onEdit={setEditingOrder} formatItems={formatItems} filter={orderFilter} setFilter={setOrderFilter} channelFilter={channelFilter} setChannelFilter={setChannelFilter} dateFilter={dateFilter} setDateFilter={setDateFilter} channels={[...new Set(normalOrders.map(o => o.channel))]} highlight={highlight} slug={active.slug} today={todayIso}/> : page === 'Recipes' ? <RecipesPage onLimit={saveLimit} onHalf={toggleHalf} onAddOption={addOption} onRemoveOption={removeOption} today={todayIso} onSoldOut={toggleSoldOut} onPhoto={uploadPhoto} onRemovePhoto={removePhoto} recipes={recipeList} recipe={selectedRecipe} onSelect={setSelectedRecipe} onNew={() => setModal('recipe')} onEdit={setEditingRecipe}/> : page === 'Inventory' ? <InventoryPage inventory={inventory} onNew={() => setModal('inventory')} onEdit={setEditingItem}/> : page === 'Reports' ? <ReportsPage orders={normalOrders} recipeList={recipeList}/> : page === 'Settings' ? <>{secrets ? <RestaurantSettings r={active} secrets={secrets} onSave={saveRestaurantSettings}/> : <p className="no-results">Loading settings…</p>}{limits && <OrderLimitsSettings limits={limits} onSave={saveLimits}/>}{isOwner && <TeamCard notify={notify}/>}<AppInstallCard notify={notify} restaurants={restaurants}/><CouponsSettings restaurants={restaurants} notify={notify}/><BackupCard restaurants={restaurants} notify={notify}/><SettingsPage key={`${active.slug}:${settings.kitchenName}:${settings.location}`} settings={settings} onSave={async (next) => { const location = (next.location || '').trim(); if (supabase) { const { error } = await supabase.from('restaurants').update({ location: location || null }).eq('id', active.id); if (error) return notify(`Could not save the location: ${error.message}`) } else setRestaurants(l => l.map(x => x.slug === active.slug ? { ...x, location } : x)); setSettings({ ...next, location }); try { localStorage.setItem(`kitchen-settings:${active.slug}`, JSON.stringify({ currency: next.currency, taxRate: next.taxRate })) } catch { /* optional */ } notify(`Kitchen profile saved for ${active.name}`) }}/></> : page === 'Bulk' ? <BulkPage restaurant={active} orders={bulkOrders} notify={notify} onSave={saveRestaurantSettings} shrinkImage={shrinkImage} today={todayIso} tableProps={{ onStatus: requestStatus, onEdit: setEditingOrder, formatItems, highlight, today: todayIso, rname: active.name, onPay: o => setPayFor({ order: o, then: null }), onCharge: setChargeFor, distance: active.charge_mode === 'distance', onAdvance: markAdvance }}/> : page === 'Help' ? <HelpPage/> : <Placeholder page={page} notify={notify}/>}</div> 
     </main>
     {chargeFor && <ChargeDialog order={chargeFor} close={() => setChargeFor(null)} onSave={(fee) => saveCharge(chargeFor, fee)}/>}
     {sheetOpen && <DeliverySheet orders={orders} today={todayIso} rname={active.name} close={() => setSheetOpen(false)} notify={notify}/>}
@@ -530,7 +537,128 @@ function App() {
 
 const Stat=({label,value,change,good,note='vs. yesterday'})=><div className="stat"><p>{label}</p><div><strong>{value}</strong><span className={good?'green':''}>{change}</span></div><small>{note}</small></div>
 const NEXT_STEP = { New: ['Cooking', 'Start cooking'], Cooking: ['Ready', 'Mark ready'], Ready: ['Delivered', 'Mark delivered'] }
-function OrderTable({orders: allOrders,onStatus,onEdit,formatItems,highlight,today,grouped,rname,onPay,onCharge,distance}) {
+/* ---------- Bulk orders (admin) ---------- */
+function printInvoice(o, rname) {
+  const w = window.open('', '_blank'); if (!w) return window.alert('Please allow pop-ups to print the invoice.')
+  const lines = orderLines(o).filter(l => !String(l.name).startsWith('Note:')), money = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`
+  const sub = lines.reduce((s, l) => s + Number(l.price || 0) * Number(l.quantity || 1), 0), fee = Number(o.deliveryFee || 0)
+  const adv = o.bulk && Number(o.bulk.advance) > 0 && (o.bulk.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')) ? Number(o.bulk.advance) : 0
+  const rows = lines.map(l => `<tr><td>${esc(l.name)}</td><td class="r">${esc(l.quantity)}</td><td class="r">${money(l.price)}</td><td class="r">${money(Number(l.price || 0) * Number(l.quantity || 1))}</td></tr>`).join('')
+  w.document.write(`<!doctype html><html><head><title>Invoice ${esc(o.id)}</title><style>body{font:14px system-ui;max-width:640px;margin:24px auto;padding:0 16px}table{width:100%;border-collapse:collapse}td,th{padding:6px 4px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}h1{margin:0}tfoot td{font-weight:700}</style></head><body><h1>${esc(rname)}</h1><p>Invoice ${esc(o.id)} · ${esc(o.placed || o.time || '')}</p><p><b>${esc(String(o.customer || '').split('·')[0].trim())}</b> · ${esc(o.phone || '')}<br>${esc(o.address || '')}<br>Delivery: ${esc(o.deliveryDate || '')}${o.bulk && o.bulk.slot ? ' · ' + esc(o.bulk.slot) : ''}</p><table><thead><tr><th>Item</th><th class="r">Plates</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="3">Items</td><td class="r">${money(sub)}</td></tr><tr><td colspan="3">Delivery charge</td><td class="r">${fee ? money(fee) : 'Free'}</td></tr><tr><td colspan="3">Total</td><td class="r">${money(o.total)}</td></tr>${adv ? `<tr><td colspan="3">Advance paid</td><td class="r">−${money(adv)}</td></tr><tr><td colspan="3">Balance to pay</td><td class="r">${money(Math.max(0, Number(o.total) - adv))}</td></tr>` : ''}</tfoot></table><p>Payment: ${esc(o.payment || '')}</p><p>Thank you. Please come back again!</p><script>window.print()<\/script></body></html>`); w.document.close()
+}
+function BulkRowInfo({ o }) {
+  const b = o.bulk || {}, adv = Number(b.advance || 0), got = b.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')
+  return <div className="bulk-line"><span className="pay-tag verify">BULK</span>{b.slot && <span>🕒 {b.slot}</span>}{b.guests && <span>👥 {b.guests}</span>}{b.spice && <span>🌶 {b.spice}</span>}{b.packing && <span>📦 {b.packing}</span>}{adv > 0 && <span className={got ? 'pay-tag ok' : 'pay-tag verify'}>Advance ₹{adv} · {got ? 'received' : 'pending'}</span>}</div>
+}
+const parseTiers = (text) => String(text || '').split(',').map(x => x.trim()).filter(Boolean).map(x => { const [q, p] = x.split(':').map(v => Number(String(v || '').trim())); return { qty: q, price: p } })
+const tiersOk = (t) => t.every(x => Number.isInteger(x.qty) && x.qty > 0 && Number.isFinite(x.price) && x.price >= 0)
+const tiersText = (tiers) => (tiers || []).map(t => `${t.qty}:${t.price}`).join(', ')
+function BulkMenuEditor({ restaurant, notify, shrinkImage }) {
+  const [items, setItems] = useState(null), [form, setForm] = useState(null), [busy, setBusy] = useState(false)
+  const load = async () => { if (!supabase) return setItems([]); const { data } = await supabase.from('bulk_items').select('*').eq('restaurant_id', restaurant.id).order('sort_order').order('name'); setItems(data || []) }
+  useEffect(() => { setItems(null); load() }, [restaurant.id])
+  const pg = usePaged(items || [], 10, (items || []).length)
+  const blank = { name: '', description: '', price: '', min_qty: '', tiers: '', is_active: true }
+  const save = async (e) => {
+    e.preventDefault(); if (busy) return
+    const tiers = parseTiers(form.tiers)
+    if (!form.name.trim() || form.price === '' || Number(form.price) < 0) return notify('Enter a name and a price')
+    if (!tiersOk(tiers)) return notify('Price tiers look like 50:230, 100:210 (plates:price)')
+    const row = { restaurant_id: restaurant.id, name: form.name.trim(), description: form.description.trim() || null, price: Number(form.price), min_qty: form.min_qty === '' ? null : Math.max(1, Math.floor(Number(form.min_qty))), tiers: tiers.sort((a, b) => a.qty - b.qty), is_active: form.is_active }
+    setBusy(true)
+    if (supabase) {
+      const { error } = form.id ? await supabase.from('bulk_items').update(row).eq('id', form.id) : await supabase.from('bulk_items').insert(row)
+      if (error) { setBusy(false); return notify(`Could not save: ${error.message}`) }
+    }
+    setBusy(false); setForm(null); await load(); notify(`Saved ${row.name}`)
+  }
+  const toggle = async (i) => { if (supabase) { const { error } = await supabase.from('bulk_items').update({ is_active: !i.is_active }).eq('id', i.id); if (error) return notify(`Could not update: ${error.message}`) } load() }
+  const remove = async (i) => { if (!window.confirm(`Delete ${i.name} from the bulk menu?`)) return; if (supabase) { const { error } = await supabase.from('bulk_items').delete().eq('id', i.id); if (error) return notify(`Could not delete: ${error.message}`) } load() }
+  const photo = async (i, file) => {
+    if (!file || !supabase) return
+    try {
+      const blob = await shrinkImage(file), path = `${restaurant.id}/bulk-${i.id}-${Date.now()}.jpg`
+      const { error } = await supabase.storage.from('dish-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: false }); if (error) return notify(`Could not upload: ${error.message}`)
+      const url = supabase.storage.from('dish-photos').getPublicUrl(path).data.publicUrl
+      const { error: e2 } = await supabase.from('bulk_items').update({ image_url: url }).eq('id', i.id); if (e2) return notify(`Could not save the photo: ${e2.message}`)
+      load(); notify('Photo saved')
+    } catch (e) { notify(e.message || 'Could not add the photo') }
+  }
+  return <section className="panel bulk-menu">
+    <div className="panel-heading"><div><h3>Bulk menu</h3><p>Write the items and prices customers see on the bulk order page.</p></div><button type="button" className="primary" onClick={() => setForm(blank)}><Icon name="plus" size={16}/> Add item</button></div>
+    {form && <form className="bulk-form" onSubmit={save}>
+      <label>Item name<input aria-label="Bulk item name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} maxLength={80} placeholder="e.g. Veg biryani" autoFocus/></label>
+      <label>Short description <small>optional</small><input aria-label="Bulk item description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} maxLength={120}/></label>
+      <div className="two"><label>Price per plate (₹)<input aria-label="Bulk item price" value={form.price} onChange={e => setForm({ ...form, price: e.target.value.replace(/[^\d.]/g, '') })} inputMode="decimal"/></label>
+        <label>Minimum plates <small>blank = default</small><input aria-label="Bulk item minimum" value={form.min_qty} onChange={e => setForm({ ...form, min_qty: e.target.value.replace(/\D/g, '') })} inputMode="numeric"/></label></div>
+      <label>Price tiers <small>lower price from a quantity, like 50:230, 100:210</small><input aria-label="Bulk item tiers" value={form.tiers} onChange={e => setForm({ ...form, tiers: e.target.value })} placeholder="50:230, 100:210"/></label>
+      <label className="bulk-check"><input type="checkbox" checked={form.is_active} onChange={e => setForm({ ...form, is_active: e.target.checked })}/> Show to customers</label>
+      <div className="cancel-actions"><button type="button" className="text-btn" onClick={() => setForm(null)}>Cancel</button><button className="primary app-btn" disabled={busy}>Save item</button></div>
+    </form>}
+    {items === null ? <p className="no-results">Loading…</p> : items.length === 0 ? <p className="no-results">No bulk items yet. Add the first one.</p> : <><ul className="bulk-list">{pg.items.map(i => <li key={i.id} className={i.is_active ? 'bulk-row' : 'bulk-row off'}>
+      {i.image_url ? <img src={i.image_url} alt="" width="48" height="48"/> : <span className="rc-noimg" aria-hidden="true">🍲</span>}
+      <div className="bulk-info"><b>{i.name}</b><small>₹{Number(i.price)} per plate · min {i.min_qty || restaurant.bulk_min_qty || 10}{(i.tiers || []).length ? ` · tiers ${tiersText(i.tiers)}` : ''}{i.is_active ? '' : ' · hidden'}</small></div>
+      <div className="bulk-btns"><label className="text-btn rc-file">Photo<input type="file" accept="image/*" aria-label={`Photo for ${i.name}`} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ''; photo(i, f) }}/></label>
+        <button type="button" className="text-btn" onClick={() => setForm({ id: i.id, name: i.name, description: i.description || '', price: String(Number(i.price)), min_qty: i.min_qty ? String(i.min_qty) : '', tiers: tiersText(i.tiers), is_active: i.is_active })}>Edit</button>
+        <button type="button" className="text-btn" onClick={() => toggle(i)}>{i.is_active ? 'Hide' : 'Show'}</button>
+        <button type="button" className="text-btn" onClick={() => remove(i)}>Delete</button></div>
+    </li>)}</ul><Pager p={pg}/></>}
+  </section>
+}
+function BulkSettingsCard({ restaurant, onSave, notify }) {
+  const [f, setF] = useState({ min: String(restaurant.bulk_min_qty ?? 10), lead: String(restaurant.bulk_lead_days ?? 1), adv: String(restaurant.bulk_advance_pct ?? 0), cap: restaurant.bulk_daily_cap == null ? '' : String(restaurant.bulk_daily_cap), slots: restaurant.bulk_slots || '', note: restaurant.bulk_note || '' })
+  useEffect(() => { setF({ min: String(restaurant.bulk_min_qty ?? 10), lead: String(restaurant.bulk_lead_days ?? 1), adv: String(restaurant.bulk_advance_pct ?? 0), cap: restaurant.bulk_daily_cap == null ? '' : String(restaurant.bulk_daily_cap), slots: restaurant.bulk_slots || '', note: restaurant.bulk_note || '' }) }, [restaurant.id])
+  const num = (v) => v.replace(/\D/g, '')
+  const save = (e) => {
+    e.preventDefault()
+    const min = Number(f.min), lead = Number(f.lead), adv = Number(f.adv), cap = f.cap === '' ? null : Number(f.cap)
+    if (!(min >= 1) || lead > 30 || adv > 100 || (cap !== null && cap < 1)) return notify('Check the numbers: minimum 1 or more, notice up to 30 days, advance up to 100%, cap 1 or more')
+    onSave({ bulk_min_qty: min, bulk_lead_days: lead, bulk_advance_pct: adv, bulk_daily_cap: cap, bulk_slots: f.slots.trim(), bulk_note: f.note.trim() || null })
+  }
+  return <form className="panel bulk-settings" onSubmit={save}>
+    <h3>Bulk rules for {restaurant.name}</h3>
+    <div className="two"><label>Minimum plates per item<input aria-label="Default minimum plates" value={f.min} onChange={e => setF({ ...f, min: num(e.target.value) })} inputMode="numeric"/></label>
+      <label>Days of notice needed<input aria-label="Bulk notice days" value={f.lead} onChange={e => setF({ ...f, lead: num(e.target.value) })} inputMode="numeric"/></label></div>
+    <div className="two"><label>Advance to pay (%) <small>0 = none</small><input aria-label="Advance percent" value={f.adv} onChange={e => setF({ ...f, adv: num(e.target.value) })} inputMode="numeric"/></label>
+      <label>Plates per day cap <small>blank = no cap</small><input aria-label="Bulk daily cap" value={f.cap} onChange={e => setF({ ...f, cap: num(e.target.value) })} inputMode="numeric"/></label></div>
+    <label>Delivery times <small>separate with commas</small><input aria-label="Bulk delivery times" value={f.slots} onChange={e => setF({ ...f, slots: e.target.value })} placeholder="9-11 am, 12-2 pm, 5-7 pm"/></label>
+    <label>Note shown to customers <small>optional</small><textarea aria-label="Bulk note" rows={2} value={f.note} onChange={e => setF({ ...f, note: e.target.value })} maxLength={300}/></label>
+    <button className="primary app-btn">Save bulk rules</button>
+  </form>
+}
+function BulkPage({ restaurant, orders, notify, onSave, shrinkImage, today, tableProps }) {
+  const [tab, setTab] = useState('Orders'), [st, setSt] = useState('All')
+  const tabs = ['Orders', 'Prep list', 'Menu', 'Report', 'Settings']
+  const live = orders.filter(o => o.status !== 'Cancelled')
+  const shown = sortByDelivery(st === 'All' ? orders : orders.filter(o => o.status === st))
+  const money = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`
+  const plates = (o) => orderLines(o).filter(l => !String(l.name).startsWith('Note:')).reduce((s, l) => s + Number(l.quantity || 1), 0)
+  // prep list: plates due per day, per item
+  const prep = {}; orders.filter(o => o.status !== 'Cancelled' && o.status !== 'Delivered' && deliveryKey(o) >= today).forEach(o => { const d = deliveryKey(o); prep[d] ||= {}; orderLines(o).filter(l => !String(l.name).startsWith('Note:')).forEach(l => { prep[d][l.name] = (prep[d][l.name] || 0) + Number(l.quantity || 1) }) })
+  const prepDays = Object.keys(prep).sort()
+  const advanceGot = (o) => o.bulk && Number(o.bulk.advance) > 0 && (o.bulk.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')) ? Number(o.bulk.advance) : 0
+  const perItem = {}; live.forEach(o => orderLines(o).filter(l => !String(l.name).startsWith('Note:')).forEach(l => { perItem[l.name] = (perItem[l.name] || 0) + Number(l.quantity || 1) }))
+  const perDay = {}; live.forEach(o => { const d = deliveryKey(o); perDay[d] = (perDay[d] || 0) + plates(o) })
+  const prepText = () => prepDays.map(d => `${dayLabel(d, today)}, ${dateText(d)}\n` + Object.entries(prep[d]).map(([n, q]) => `${q} × ${n}`).join('\n')).join('\n\n')
+  return <div className="bulk-page">
+    <section className="panel bulk-top"><div><h3>Bulk orders · {restaurant.name}</h3><p>{restaurant.bulk_enabled ? 'Customers can see "Order in bulk" on their screen.' : 'Bulk ordering is off. Customers cannot see it.'}</p></div>
+      <button type="button" role="switch" aria-checked={Boolean(restaurant.bulk_enabled)} aria-label="Bulk orders on or off" className={restaurant.bulk_enabled ? 'switch on ok' : 'switch'} onClick={() => onSave({ bulk_enabled: !restaurant.bulk_enabled })}><i/></button></section>
+    <div className="tabs" role="tablist" aria-label="Bulk sections">{tabs.map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'tab on' : 'tab'} onClick={() => setTab(t)}>{t}{t === 'Orders' ? ` ${orders.length}` : ''}</button>)}</div>
+    {tab === 'Orders' && <section className="panel orders-panel">
+      <div className="tabs status-tabs" role="tablist" aria-label="Bulk order status">{['All', 'New', 'Cooking', 'Ready', 'Delivered', 'Cancelled'].map(s => <button key={s} role="tab" aria-selected={st === s} className={st === s ? 'tab on' : 'tab'} onClick={() => setSt(s)}>{s} {s === 'All' ? orders.length : orders.filter(o => o.status === s).length}</button>)}</div>
+      {shown.length ? <OrderTable orders={shown} {...tableProps}/> : <p className="no-results">No bulk orders here yet.</p>}</section>}
+    {tab === 'Prep list' && <section className="panel bulk-prep"><div className="panel-heading"><div><h3>Prep list</h3><p>Plates to make, by delivery day.</p></div>{prepDays.length > 0 && <CopyButton text={prepText()} label="Copy" aria="Copy prep list"/>}</div>
+      {prepDays.length ? prepDays.map(d => <div key={d} className="bulk-day"><b>{dayLabel(d, today)} <span>{dateText(d)}</span> · {Object.values(prep[d]).reduce((s, q) => s + q, 0)} plates</b><ul>{Object.entries(prep[d]).sort((a, b) => b[1] - a[1]).map(([n, q]) => <li key={n}><span>{n}</span><b>{q}</b></li>)}</ul></div>) : <p className="no-results">No bulk plates to prepare.</p>}</section>}
+    {tab === 'Menu' && <BulkMenuEditor restaurant={restaurant} notify={notify} shrinkImage={shrinkImage}/>}
+    {tab === 'Report' && <section className="panel bulk-report"><div className="panel-heading"><div><h3>Bulk report</h3><p>Kept separate from normal sales.</p></div></div>
+      <div className="day-end-grid"><div><span>Bulk orders</span><b>{live.length}</b></div><div><span>Plates</span><b>{live.reduce((s, o) => s + plates(o), 0)}</b></div><div><span>Bulk sales</span><b>{money(live.reduce((s, o) => s + Number(o.total || 0), 0))}</b></div><div><span>Advance received</span><b>{money(live.reduce((s, o) => s + advanceGot(o), 0))}</b></div></div>
+      <h4>Top items</h4><ul className="bulk-rank">{Object.entries(perItem).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([n, q]) => <li key={n}><span>{n}</span><b>{q} plates</b></li>)}{!Object.keys(perItem).length && <li>No data yet</li>}</ul>
+      <h4>Plates by delivery day</h4><ul className="bulk-rank">{Object.entries(perDay).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 10).map(([d, q]) => <li key={d}><span>{dayLabel(d, today)} · {dateText(d)}</span><b>{q} plates</b></li>)}{!Object.keys(perDay).length && <li>No data yet</li>}</ul></section>}
+    {tab === 'Settings' && <BulkSettingsCard restaurant={restaurant} onSave={onSave} notify={notify}/>}
+  </div>
+}
+
+function OrderTable({orders: allOrders,onStatus,onEdit,formatItems,highlight,today,grouped,rname,onPay,onCharge,distance,onAdvance}) {
   const pg = usePaged(allOrders, 10, allOrders.length + ':' + (allOrders[allOrders.length - 1] || {}).id), orders = pg.items
   const rows = []; let last = null
   orders.forEach(o => {
@@ -539,7 +667,7 @@ function OrderTable({orders: allOrders,onStatus,onEdit,formatItems,highlight,tod
       last = dk; const n = allOrders.filter(x => deliveryKey(x) === dk).length, rel = dayLabel(dk, today), abs = dateText(dk)
       rows.push(<div className="day-head" key={'head-' + dk}><b>{rel}</b>{rel !== abs && <span>{abs}</span>}<em>{n} order{n === 1 ? '' : 's'}</em></div>)
     }
-    rows.push(<div className={o.id === highlight ? 'order-row flash' : 'order-row'} key={o.id}><div className="avatar">{o.avatar}</div><div className="order-person"><b>{o.customer}</b><span>{o.id} · {o.channel}</span>{o.paymentStatus === 'pending' && o.status !== 'Cancelled' && <span className={o.paymentClaimedAt ? 'pay-tag verify' : 'pay-tag'}>{o.paymentClaimedAt ? `UPI · verify payment${o.paymentTxn ? ' · txn ' + o.paymentTxn : ''}` : o.paymentRejectReason ? `UPI · payment rejected: ${o.paymentRejectReason}` : 'UPI · payment pending'}</span>}{o.paymentStatus === 'received' && <span className="pay-tag ok">UPI · paid</span>}{o.deliveryFeePending && o.status !== 'Cancelled' && <span className="pay-tag verify">Delivery charge needed</span>}{!o.deliveryFeePending && o.deliveryFee > 0 && <span className="pay-tag">Delivery ₹{o.deliveryFee}</span>}{o.rating > 0 && <span className="pay-tag ok">★ {o.rating}{o.ratingComment ? ` · ${o.ratingComment}` : ''}</span>}{o.status === 'Cancelled' && o.cancelReason && <span className="cancel-why">Reason: {o.cancelReason}</span>}</div><div className="order-items"><div>{formatItems(o.items)}</div><small className="order-meta"><span className="om-date">🗓 Deliver: {deliveryText(dk, today)}</span>{o.address && <span className="om-addr">📍 <span className="om-text">{o.address}</span> <CopyButton text={o.address} label="Copy" aria="Copy address"/></span>}{o.payment && <span>💳 {o.payment}</span>}</small></div><div className="order-total">₹{o.total}<span>Placed {o.placed || o.time}</span></div><select className={`status status-select ${o.status.toLowerCase()}`} aria-label={`Status for ${o.id}`} value={o.status} onChange={e=>onStatus(o.id,e.target.value)}>{['New','Cooking','Ready','Delivered','Cancelled'].map(status=><option key={status}>{status}</option>)}</select><div className="row-actions">{NEXT_STEP[o.status] && o.paymentStatus !== 'pending' && <button type="button" className="next-step" onClick={() => onStatus(o.id, NEXT_STEP[o.status][0])}>{NEXT_STEP[o.status][1]}</button>}{o.deliveryFeePending && o.status !== 'Cancelled' && <button className="edit-order pay-confirm" onClick={() => onCharge(o)}>Set delivery charge</button>}{!o.deliveryFeePending && distance && !['Delivered', 'Cancelled'].includes(o.status) && <button className="edit-order" onClick={() => onCharge(o)}>Change charge</button>}{o.paymentStatus === 'pending' && o.status !== 'Cancelled' && <button className="edit-order pay-confirm" onClick={() => onPay(o)}>{o.paymentClaimedAt ? 'Verify payment' : 'Confirm payment'}</button>}<button className="edit-order" onClick={() => onEdit(o)}>Open</button><button className="edit-order" onClick={() => printTicket(o)}>Print</button>{whatsappLink(o, rname) ? <a className="edit-order wa-order" href={whatsappLink(o, rname)} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${o.customer}`}>WhatsApp</a> : <span className="edit-order wa-none" title="No phone number on this order">No phone</span>}</div></div>)
+    rows.push(<div className={o.id === highlight ? 'order-row flash' : 'order-row'} key={o.id}><div className="avatar">{o.avatar}</div><div className="order-person"><b>{o.customer}</b><span>{o.id} · {o.channel}</span>{o.paymentStatus === 'pending' && o.status !== 'Cancelled' && <span className={o.paymentClaimedAt ? 'pay-tag verify' : 'pay-tag'}>{o.paymentClaimedAt ? `UPI · verify payment${o.paymentTxn ? ' · txn ' + o.paymentTxn : ''}` : o.paymentRejectReason ? `UPI · payment rejected: ${o.paymentRejectReason}` : 'UPI · payment pending'}</span>}{o.paymentStatus === 'received' && <span className="pay-tag ok">UPI · paid</span>}{o.deliveryFeePending && o.status !== 'Cancelled' && <span className="pay-tag verify">Delivery charge needed</span>}{!o.deliveryFeePending && o.deliveryFee > 0 && <span className="pay-tag">Delivery ₹{o.deliveryFee}</span>}{o.rating > 0 && <span className="pay-tag ok">★ {o.rating}{o.ratingComment ? ` · ${o.ratingComment}` : ''}</span>}{o.status === 'Cancelled' && o.cancelReason && <span className="cancel-why">Reason: {o.cancelReason}</span>}</div><div className="order-items"><div>{formatItems(o.items)}</div>{o.kind === 'bulk' && <BulkRowInfo o={o}/>}<small className="order-meta"><span className="om-date">🗓 Deliver: {deliveryText(dk, today)}</span>{o.address && <span className="om-addr">📍 <span className="om-text">{o.address}</span> <CopyButton text={o.address} label="Copy" aria="Copy address"/></span>}{o.payment && <span>💳 {o.payment}</span>}</small></div><div className="order-total">₹{o.total}<span>Placed {o.placed || o.time}</span></div><select className={`status status-select ${o.status.toLowerCase()}`} aria-label={`Status for ${o.id}`} value={o.status} onChange={e=>onStatus(o.id,e.target.value)}>{['New','Cooking','Ready','Delivered','Cancelled'].map(status=><option key={status}>{status}</option>)}</select><div className="row-actions">{o.kind === 'bulk' && onAdvance && Number(o.bulk && o.bulk.advance) > 0 && !(o.payment === 'UPI' && o.paymentStatus === 'received') && <button type="button" className="edit-order" onClick={() => onAdvance(o)}>{o.bulk.advance_received ? 'Undo advance' : 'Advance received'}</button>}{o.kind === 'bulk' && <button type="button" className="edit-order" onClick={() => printInvoice(o, rname)}>Invoice</button>}{NEXT_STEP[o.status] && o.paymentStatus !== 'pending' && <button type="button" className="next-step" onClick={() => onStatus(o.id, NEXT_STEP[o.status][0])}>{NEXT_STEP[o.status][1]}</button>}{o.deliveryFeePending && o.status !== 'Cancelled' && <button className="edit-order pay-confirm" onClick={() => onCharge(o)}>Set delivery charge</button>}{!o.deliveryFeePending && distance && !['Delivered', 'Cancelled'].includes(o.status) && <button className="edit-order" onClick={() => onCharge(o)}>Change charge</button>}{o.paymentStatus === 'pending' && o.status !== 'Cancelled' && <button className="edit-order pay-confirm" onClick={() => onPay(o)}>{o.paymentClaimedAt ? 'Verify payment' : 'Confirm payment'}</button>}<button className="edit-order" onClick={() => onEdit(o)}>Open</button><button className="edit-order" onClick={() => printTicket(o)}>Print</button>{whatsappLink(o, rname) ? <a className="edit-order wa-order" href={whatsappLink(o, rname)} target="_blank" rel="noopener noreferrer" aria-label={`WhatsApp ${o.customer}`}>WhatsApp</a> : <span className="edit-order wa-none" title="No phone number on this order">No phone</span>}</div></div>)
   })
   return <><div className="order-table">{rows}</div><Pager p={pg} /></>
 }

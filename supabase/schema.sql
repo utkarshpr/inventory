@@ -19,6 +19,9 @@ create table if not exists public.orders (
 );
 alter table public.orders add column if not exists delivery_address text;
 alter table public.orders add column if not exists payment_method text not null default 'Cash on delivery';
+-- Bulk orders live in the same table, marked by kind = 'bulk' (their details are in the bulk column)
+alter table public.orders add column if not exists kind text not null default 'normal';
+alter table public.orders add column if not exists bulk jsonb;
 
 create table if not exists public.recipes (
   id uuid primary key default gen_random_uuid(),
@@ -81,6 +84,14 @@ create or replace function public.default_restaurant_id() returns uuid
 language sql stable as $$ select id from public.restaurants where slug = 'salt-and-saffron' $$;
 
 alter table public.restaurants      add column if not exists location text;
+alter table public.restaurants      add column if not exists upi_enabled boolean not null default true;
+alter table public.restaurants      add column if not exists bulk_enabled boolean not null default false;
+alter table public.restaurants      add column if not exists bulk_min_qty int not null default 10;
+alter table public.restaurants      add column if not exists bulk_lead_days int not null default 1;
+alter table public.restaurants      add column if not exists bulk_advance_pct int not null default 0;
+alter table public.restaurants      add column if not exists bulk_daily_cap int;
+alter table public.restaurants      add column if not exists bulk_note text;
+alter table public.restaurants      add column if not exists bulk_slots text not null default '9-11 am, 12-2 pm, 5-7 pm, 7-9 pm';
 alter table public.orders           add column if not exists restaurant_id uuid references public.restaurants(id);
 alter table public.recipes          add column if not exists restaurant_id uuid references public.restaurants(id);
 alter table public.inventory_items  add column if not exists restaurant_id uuid references public.restaurants(id);
@@ -414,6 +425,9 @@ begin
   if p_payment not in ('Cash on delivery', 'UPI') then
     raise exception 'Invalid payment method';
   end if;
+  if p_payment = 'UPI' and not coalesce(rest.upi_enabled, true) then
+    raise exception 'UPI_OFF: UPI is not available right now. Please choose cash on delivery.';
+  end if;
 
   -- Phone: a real 10-digit mobile number (spaces, +91 and dashes are fine)
   v_phone := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
@@ -575,7 +589,7 @@ create or replace function public.track_order(p_order_number text)
 returns jsonb
 language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
-    'rating', o.rating, 'rating_comment', o.rating_comment, 'delivery_fee', o.delivery_fee, 'delivery_fee_pending', o.delivery_fee_pending,
+    'rating', o.rating, 'rating_comment', o.rating_comment, 'delivery_fee', o.delivery_fee, 'kind', o.kind, 'bulk', o.bulk, 'delivery_fee_pending', o.delivery_fee_pending,
     'eta_at', case when o.status in ('New', 'Cooking') and r.prep_minutes is not null and o.payment_status <> 'pending'
                     and o.delivery_date = (now() at time zone coalesce(r.timezone, 'Asia/Kolkata'))::date
                    then coalesce(o.cooking_at, o.payment_confirmed_at, o.created_at) + make_interval(mins => r.prep_minutes) end,
@@ -597,7 +611,7 @@ begin
   select count(*) into v_total from public.orders o0 where o0.customer_phone = v_phone and (p_restaurant is null or o0.restaurant_id = (select id from public.restaurants where slug = p_restaurant));
   select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
     select jsonb_build_object('rating', o.rating, 'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
-      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'delivery_fee_pending', o.delivery_fee_pending, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
+      'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'kind', o.kind, 'delivery_fee_pending', o.delivery_fee_pending, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
     from public.orders o join public.restaurants r on r.id = o.restaurant_id
     where o.customer_phone = v_phone and (p_restaurant is null or r.slug = p_restaurant) order by o.created_at desc limit v_lim offset v_off) s;
   return jsonb_build_object('total', v_total, 'limit', v_lim, 'offset', v_off, 'orders', v_rows);
@@ -683,7 +697,7 @@ returns trigger
 language plpgsql security definer set search_path = public, extensions as $$
 declare r record; t text;
 begin
-  if new.channel <> 'Customer form' then return new; end if;
+  if new.channel not in ('Customer form', 'Bulk order') then return new; end if;
   select s.alert_topic, x.name into r
     from public.restaurants x left join public.restaurant_secrets s on s.restaurant_id = x.id
    where x.id = new.restaurant_id;
@@ -693,7 +707,7 @@ begin
       url := 'https://ntfy.sh/',
       body := jsonb_build_object(
         'topic', r.alert_topic,
-        'title', r.name || ': new order',
+        'title', r.name || case when new.channel = 'Bulk order' then ': NEW BULK ORDER' else ': new order' end,
         'message', new.order_number || ' · ₹' || trim_scale(new.total)::text || ' · delivery ' || new.delivery_date::text,
         'priority', 4, 'tags', jsonb_build_array('bell')));
   exception when others then
@@ -734,7 +748,7 @@ returns trigger
 language plpgsql security definer set search_path = public, extensions as $$
 declare c record; rname text;
 begin
-  if new.channel <> 'Customer form' then return new; end if;
+  if new.channel not in ('Customer form', 'Bulk order') then return new; end if;
   select function_url, shared_secret into c from public.push_config limit 1;
   if c.function_url is null or c.shared_secret is null then return new; end if;
   if not exists (select 1 from public.push_subscriptions where restaurant_id = new.restaurant_id) then return new; end if;
@@ -1193,3 +1207,167 @@ create index if not exists recipe_ingredients_item_idx   on public.recipe_ingred
 create index if not exists coupons_restaurant_idx   on public.coupons (restaurant_id);
 create index if not exists push_subs_restaurant_idx on public.push_subscriptions (restaurant_id);
 analyze public.orders; analyze public.recipes; analyze public.inventory_items; analyze public.recipe_ingredients;
+
+-- ============================================================
+-- 13. Bulk orders (a separate flow from normal orders)
+-- ============================================================
+create table if not exists public.bulk_items (
+  id uuid primary key default gen_random_uuid(),
+  restaurant_id uuid not null references public.restaurants(id) on delete cascade,
+  name text not null check (length(trim(name)) between 1 and 80),
+  description text,
+  price numeric(10,2) not null check (price >= 0),
+  min_qty int check (min_qty is null or min_qty >= 1),
+  tiers jsonb not null default '[]'::jsonb,        -- [{"qty": 50, "price": 230}]: a lower price from that quantity
+  image_url text,
+  is_active boolean not null default true,
+  sort_order int not null default 0,
+  created_at timestamptz not null default now()
+);
+create index if not exists bulk_items_restaurant_idx on public.bulk_items (restaurant_id, is_active, sort_order);
+create index if not exists orders_kind_idx on public.orders (restaurant_id, kind, created_at desc);
+alter table public.bulk_items enable row level security;
+drop policy if exists "Staff can manage bulk items" on public.bulk_items;
+create policy "Staff can manage bulk items" on public.bulk_items for all to authenticated using (true) with check (true);
+
+-- Plates already booked for each upcoming date (not cancelled)
+create or replace function public.bulk_plates_on(p_restaurant uuid, p_date date) returns int
+language sql stable security definer set search_path = public as $$
+  select coalesce(sum(case when jsonb_typeof(i) = 'object' and (i->>'name') not like 'Note:%' then (i->>'quantity')::int else 0 end), 0)::int
+    from public.orders o, jsonb_array_elements(case when jsonb_typeof(o.items) = 'array' then o.items else '[]'::jsonb end) i
+   where o.restaurant_id = p_restaurant and o.kind = 'bulk' and o.status <> 'Cancelled' and o.delivery_date = p_date
+$$;
+revoke all on function public.bulk_plates_on(uuid, date) from public, anon, authenticated;
+
+create or replace function public.get_bulk_menu(p_restaurant text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare rest record; today date; booked jsonb := '{}'::jsonb; d date; n int;
+begin
+  select * into rest from public.restaurants where slug = p_restaurant;
+  if not found then return null; end if;
+  today := (now() at time zone coalesce(rest.timezone, 'Asia/Kolkata'))::date;
+  if rest.bulk_daily_cap is not null then
+    for d in select generate_series(today, today + 90, interval '1 day')::date loop
+      n := public.bulk_plates_on(rest.id, d);
+      if n > 0 then booked := booked || jsonb_build_object(d::text, n); end if;
+    end loop;
+  end if;
+  return jsonb_build_object(
+    'enabled', rest.bulk_enabled, 'note', rest.bulk_note, 'min_qty', rest.bulk_min_qty, 'lead_days', rest.bulk_lead_days,
+    'advance_pct', rest.bulk_advance_pct, 'daily_cap', rest.bulk_daily_cap, 'today', today,
+    'earliest', today + rest.bulk_lead_days, 'latest', today + 90,
+    'slots', (select coalesce(jsonb_agg(trim(x)) filter (where trim(x) <> ''), '[]'::jsonb) from unnest(string_to_array(rest.bulk_slots, ',')) x),
+    'booked', booked,
+    'items', (select coalesce(jsonb_agg(jsonb_strip_nulls(jsonb_build_object('id', b.id, 'name', b.name, 'description', b.description, 'price', b.price,
+                'min_qty', coalesce(b.min_qty, rest.bulk_min_qty), 'tiers', b.tiers, 'image_url', b.image_url)) order by b.sort_order, b.name), '[]'::jsonb)
+                from public.bulk_items b where b.restaurant_id = rest.id and b.is_active));
+end $$;
+revoke all on function public.get_bulk_menu(text) from public;
+grant execute on function public.get_bulk_menu(text) to anon, authenticated;
+
+create or replace function public.place_bulk_order(
+  p_restaurant text, p_name text, p_phone text, p_address text, p_payment text, p_notes text, p_items jsonb,
+  p_delivery_date date, p_slot text default null, p_guests int default null, p_spice text default null, p_packing text default null
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  rest record; it jsonb; bi record; q int; unit numeric; today date;
+  v_phone text; v_ip text; v_hash text; n int; v_ch int;
+  total numeric := 0; subtotal numeric; v_fee numeric := 0; v_pending boolean := false; v_adv numeric := 0; plates int := 0; booked int;
+  lines jsonb := '[]'::jsonb; num text; tries int := 0; meta jsonb; slots text[];
+begin
+  select * into rest from public.restaurants where slug = p_restaurant;
+  if not found then raise exception 'Restaurant not found'; end if;
+  if not rest.is_open then
+    raise exception 'RESTAURANT_CLOSED: %', coalesce(nullif(trim(rest.closed_message), ''), 'We are closed right now. Please check back soon.');
+  end if;
+  if not rest.bulk_enabled then raise exception 'BULK_OFF: Bulk orders are not open right now.'; end if;
+  if coalesce(trim(p_name), '') = '' or coalesce(trim(p_phone), '') = '' or coalesce(trim(p_address), '') = '' then
+    raise exception 'Name, phone and delivery address are required';
+  end if;
+  if length(p_name) > 80 or length(p_phone) > 20 or length(p_address) > 300 or length(coalesce(p_notes, '')) > 300 then
+    raise exception 'Some details are too long';
+  end if;
+  if p_payment not in ('Cash on delivery', 'UPI') then raise exception 'Invalid payment method'; end if;
+  if p_payment = 'UPI' and not coalesce(rest.upi_enabled, true) then
+    raise exception 'UPI_OFF: UPI is not available right now. Please choose cash on delivery.';
+  end if;
+  v_phone := regexp_replace(coalesce(p_phone, ''), '\D', '', 'g');
+  if length(v_phone) > 10 then v_phone := right(v_phone, 10); end if;
+  if length(v_phone) <> 10 or v_phone !~ '^[6-9]' then raise exception 'INVALID_PHONE: Enter a valid 10-digit mobile number'; end if;
+  select count(*) into n from public.orders where customer_phone = v_phone and channel = 'Bulk order' and created_at > now() - interval '24 hours';
+  if n >= 5 then raise exception 'RATE_LIMIT: Too many bulk orders from this phone number today. Please call the kitchen.'; end if;
+  select coalesce(max(per_connection_hour), 20) into v_ch from public.order_limits;
+  begin
+    v_ip := nullif(trim(split_part(coalesce((nullif(current_setting('request.headers', true), ''))::json ->> 'x-forwarded-for', ''), ',', 1)), '');
+  exception when others then v_ip := null; end;
+  if v_ip is not null then
+    v_hash := md5(v_ip);
+    select count(*) into n from public.orders where client_hash = v_hash and created_at > now() - interval '1 hour';
+    if v_ch > 0 and n >= v_ch then raise exception 'RATE_LIMIT: Too many orders from this connection. Please try again later, or call the kitchen.'; end if;
+  end if;
+
+  today := (now() at time zone coalesce(rest.timezone, 'Asia/Kolkata'))::date;
+  if p_delivery_date is null or p_delivery_date < today + rest.bulk_lead_days or p_delivery_date > today + 90 then
+    raise exception 'BULK_DATE: Bulk orders need at least % day% notice. Please choose a later date.', rest.bulk_lead_days, case when rest.bulk_lead_days = 1 then '' else 's' end;
+  end if;
+  slots := array(select trim(x) from unnest(string_to_array(rest.bulk_slots, ',')) x where trim(x) <> '');
+  if p_slot is not null and trim(p_slot) <> '' and not (trim(p_slot) = any(slots)) then raise exception 'Please choose one of the delivery times'; end if;
+  if p_packing is not null and p_packing not in ('Individual boxes', 'Bulk trays') then raise exception 'Invalid packing choice'; end if;
+  if p_spice is not null and p_spice not in ('Mild', 'Medium', 'Hot') then raise exception 'Invalid spice level'; end if;
+  if p_guests is not null and (p_guests < 1 or p_guests > 100000) then raise exception 'Invalid guest count'; end if;
+  if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 or jsonb_array_length(p_items) > 20 then
+    raise exception 'Select at least one item';
+  end if;
+
+  for it in select * from jsonb_array_elements(p_items) loop
+    begin q := (it->>'quantity')::int; exception when others then q := 0; end;
+    if q < 1 or q > 5000 then raise exception 'Invalid quantity'; end if;
+    begin
+      select * into bi from public.bulk_items where id = (it->>'item_id')::uuid and restaurant_id = rest.id and is_active;
+    exception when others then bi := null; end;
+    if bi.id is null then raise exception 'An item is no longer available'; end if;
+    if q < coalesce(bi.min_qty, rest.bulk_min_qty) then
+      raise exception 'BULK_MIN: The minimum for % is % plates', bi.name, coalesce(bi.min_qty, rest.bulk_min_qty);
+    end if;
+    unit := coalesce((select t.price from jsonb_to_recordset(bi.tiers) as t(qty int, price numeric) where t.qty <= q order by t.qty desc limit 1), bi.price);
+    total := total + unit * q; plates := plates + q;
+    lines := lines || jsonb_build_array(jsonb_build_object('name', bi.name, 'quantity', q, 'price', unit));
+  end loop;
+
+  perform pg_advisory_xact_lock(hashtext('bulk:' || rest.id::text || p_delivery_date::text));
+  if rest.bulk_daily_cap is not null then
+    booked := public.bulk_plates_on(rest.id, p_delivery_date);
+    if booked + plates > rest.bulk_daily_cap then
+      raise exception 'BULK_FULL: % is fully booked (only % plates left that day). Please choose another date or fewer plates.', to_char(p_delivery_date, 'DD Mon'), greatest(rest.bulk_daily_cap - booked, 0);
+    end if;
+  end if;
+
+  subtotal := total;
+  v_pending := rest.charge_mode = 'distance';
+  v_fee := case when v_pending then 0 when rest.free_delivery_above is not null and subtotal >= rest.free_delivery_above then 0 else coalesce(rest.delivery_fee, 0) end;
+  total := total + v_fee;
+  v_adv := case when rest.bulk_advance_pct > 0 then ceil(subtotal * rest.bulk_advance_pct / 100.0) else 0 end;
+  meta := jsonb_strip_nulls(jsonb_build_object('slot', nullif(trim(coalesce(p_slot, '')), ''), 'guests', p_guests, 'spice', p_spice, 'packing', p_packing,
+            'advance', v_adv, 'advance_pct', rest.bulk_advance_pct, 'advance_received', false));
+  if coalesce(trim(p_notes), '') <> '' then
+    lines := lines || jsonb_build_array(jsonb_build_object('name', 'Note: ' || trim(p_notes), 'quantity', 1, 'price', 0));
+  end if;
+
+  loop
+    num := rest.order_prefix || 'B-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 5));
+    begin
+      insert into public.orders (restaurant_id, order_number, customer_name, customer_phone, client_hash, channel, kind, bulk, status, total, items, delivery_address, delivery_date, payment_method, payment_status, delivery_fee, delivery_fee_pending)
+      values (rest.id, num, trim(p_name) || ' · ' || trim(p_phone), v_phone, v_hash, 'Bulk order', 'bulk', meta, 'New', total, lines, trim(p_address), p_delivery_date, p_payment,
+              case when p_payment = 'UPI' then 'pending' else 'not_required' end, v_fee, v_pending);
+      exit;
+    exception when unique_violation then
+      tries := tries + 1;
+      if tries > 5 then raise exception 'Could not create the order, please try again'; end if;
+    end;
+  end loop;
+  return jsonb_build_object('order_number', num, 'total', total, 'subtotal', subtotal, 'delivery_fee', v_fee, 'delivery_fee_pending', v_pending,
+    'delivery_date', p_delivery_date, 'advance', v_adv, 'bulk', meta, 'payment', p_payment, 'items', lines, 'today', today);
+end $$;
+revoke all on function public.place_bulk_order(text, text, text, text, text, text, jsonb, date, text, int, text, text) from public;
+grant execute on function public.place_bulk_order(text, text, text, text, text, text, jsonb, date, text, int, text, text) to anon, authenticated;

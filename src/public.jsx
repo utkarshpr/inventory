@@ -20,6 +20,7 @@ function Ico({ n, size = 22 }) {
 
 // last order reference: one per restaurant (so a restaurant page only ever shows its own order) plus one overall for the home page
 const readSaved = (slug) => { try { return localStorage.getItem(slug ? `last-order-ref:${slug}` : 'last-order-ref') || '' } catch { return '' } }
+const bulkAgain = (slug, items) => { try { sessionStorage.setItem('bulk-reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/bulk` }
 const orderAgain = (slug, items) => { try { sessionStorage.setItem('reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/order` }
 const itemText = (items) => (items || []).map(i => /^\d+\s*×/.test(i.name || '') ? i.name : `${i.quantity}× ${i.name}${i.options ? ` (${i.options})` : ''}`).join(', ')
 const placedText = (iso) => iso ? new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' }) : ''
@@ -42,6 +43,7 @@ export function PublicRouter({ path, onStaff }) {
   if (!parts.length) return <Home list={list} onStaff={onStaff} />
   if (!list.some(x => x.slug === parts[0])) return <Home list={list} onStaff={onStaff} missing={parts[0]} />
   const r = list.find(x => x.slug === parts[0])
+  if (parts[1] === 'bulk') return <BulkOrderPage r={r} list={list} />
   return parts[1] === 'order' ? <OrderPage r={r} list={list} /> : <RestaurantLanding r={r} list={list} onStaff={onStaff} />
 }
 
@@ -102,7 +104,7 @@ function RestaurantLanding({ r, list, onStaff }) {
       </div>
       <div className="c-hero-foot">
         {r.is_open
-          ? <a className="c-cta c-cta-hero landing-order" href={`/${r.slug}/order`}>Order now</a>
+          ? <><a className="c-cta c-cta-hero landing-order" href={`/${r.slug}/order`}>Order now</a>{r.bulk_enabled && <a className="c-cta c-cta-btn landing-bulk" href={`/${r.slug}/bulk`}>Order in bulk</a>}</>
           : <div className="c-closed-box" role="status"><b>Closed right now</b><span>{closedText(r)}</span></div>}
         <WhatsAppLink r={r} className="c-wa c-wa-hero" />
       </div>
@@ -198,7 +200,7 @@ function OrderPage({ r, list }) {
   const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [payment, setPayment] = useState(PAYMENTS[0]), [notes, setNotes] = useState('')
   const [sending, setSending] = useState(false), [error, setError] = useState(''), [placed, setPlaced] = useState(null), [dialog, setDialog] = useState(false)
   const [dishQ, setDishQ] = useState(''), [editDetails, setEditDetails] = useState(false), [activeOrder, setActiveOrder] = useState(null)
-  const [tab, setTab] = useState('menu')   // 'menu' = add to cart and order, 'orders' = sign in with a phone number, see and track orders
+  const [tab, setTab] = useState(() => { try { return new URLSearchParams(window.location.search).get('tab') === 'orders' ? 'orders' : 'menu' } catch { return 'menu' } })   // 'menu' = add to cart and order, 'orders' = sign in with a phone number, see and track orders
   const [custPhone, setCustPhone] = useState(() => { try { const v = digits10((JSON.parse(localStorage.getItem('customer-details') || '{}') || {}).phone); return /^[6-9]\d{9}$/.test(v) ? v : '' } catch { return '' } })   // logged in by phone number alone
   useEffect(() => { if (custPhone) setPhone(cur => cur || custPhone) }, [custPhone])   // the order form uses the number you signed in with
   useEffect(() => {   // the newest order that is still on its way, shown as a small bar above the menu
@@ -354,7 +356,7 @@ function OrderPage({ r, list }) {
     if (err) {
       if (/INVALID_DELIVERY_DATE/.test(err.message)) { loadDays(); return setError('That delivery day is no longer available. Please choose another day.') }
       if (/RESTAURANT_CLOSED/.test(err.message)) { setForcedClosed(err.message.replace(/^.*RESTAURANT_CLOSED:\s*/, '')); return }
-      const known = /^(INVALID_PHONE|RATE_LIMIT|MIN_ORDER|SOLD_OUT|COUPON|OPTIONS):/.test(err.message)
+      const known = /^(INVALID_PHONE|RATE_LIMIT|MIN_ORDER|SOLD_OUT|COUPON|OPTIONS|UPI_OFF):/.test(err.message)
       return setError(known ? err.message.replace(/^[A-Z_]+:\s*/, '') : `Could not place your order: ${err.message}`)
     }
     const ref = data.order_number
@@ -432,7 +434,7 @@ function OrderPage({ r, list }) {
             <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="House or flat, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
             </div>
             <fieldset className="c-field c-pay"><legend>Payment</legend>
-              <div className="c-chips">{PAYMENTS.map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
+              <div className="c-chips">{PAYMENTS.filter(p => p !== 'UPI' || r.upi_enabled !== false).map(p => <label key={p} className={payment === p ? 'c-chip on' : 'c-chip'}><input type="radio" name="payment" value={p} checked={payment === p} onChange={() => setPayment(p)} />{p}</label>)}</div>
               {payment === 'UPI' && r.upi_id && UPI_RE.test(r.upi_id) && <p className="c-sub c-upi-hint">{distance ? "After the kitchen adds the delivery charge you'll see a QR code and the UPI ID to pay." : "After you place the order you'll see a QR code and the UPI ID to pay."}</p>}
             </fieldset>
             {picked.length > 0 && <div className="c-summary" aria-label="Order summary">
@@ -619,7 +621,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
     {res && !orders.length && <p className="c-note">No orders yet for this number. They will show here after you order.</p>}
     <ul className="c-mine-list">
       {orders.map(o => <li key={o.order_number}><button type="button" className="c-mine-row" onClick={() => { setSel(o.order_number); setTrack(false) }}>
-        <span className="c-mine-main"><b>{o.order_number}</b><small>{count(o)} item{count(o) === 1 ? '' : 's'} · {money(Number(o.total))}{o.delivery_fee_pending ? ' + delivery' : ''}</small>{o.delivery_fee_pending && <small className="c-mine-wait">Kitchen is adding the delivery charge</small>}</span>
+        <span className="c-mine-main"><b>{o.order_number}{o.kind === 'bulk' && <em className="c-bulk-tag">Bulk</em>}</b><small>{count(o)} item{count(o) === 1 ? '' : 's'} · {money(Number(o.total))}{o.delivery_fee_pending ? ' + delivery' : ''}</small>{o.delivery_fee_pending && <small className="c-mine-wait">Kitchen is adding the delivery charge</small>}</span>
         <span className={o.status === 'Cancelled' ? 'c-mine-status off' : 'c-mine-status'}>{statusText(o)}</span><span aria-hidden="true" className="c-mine-go">›</span>
       </button></li>)}
     </ul>
@@ -633,6 +635,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
             <p className="c-dlg-rest">{d.restaurant || r.name}</p>
             <div className="c-dlg-ref"><code>{sel}</code><button type="button" className="c-btn c-btn-ink" onClick={async () => { await copyText(sel); setCopied(sel); setTimeout(() => setCopied(''), 1800) }}>{copied === sel ? 'Copied' : 'Copy'}</button></div>
             <p className="c-mine-status big">{statusText(d)}</p>
+            {d.kind === 'bulk' && <p className="c-bulk-meta"><em className="c-bulk-tag">Bulk order</em>{d.bulk && d.bulk.slot ? ` · ${d.bulk.slot}` : ''}{d.bulk && d.bulk.guests ? ` · ${d.bulk.guests} guests` : ''}{d.bulk && d.bulk.spice ? ` · ${d.bulk.spice}` : ''}{d.bulk && d.bulk.packing ? ` · ${d.bulk.packing}` : ''}</p>}
             {d.delivery_date && <p className="c-dlg-deliver">Delivery: {deliveryText(d.delivery_date, zonedNow(rr.timezone || 'Asia/Kolkata').date)}</p>}
             <ul className="c-dlg-items" aria-label="Items">
               {lines.map((l, k) => <li key={k}><span>{l.quantity} × {l.name}{l.options ? ` (${l.options})` : ''}</span><span>{money(Number(l.price || 0) * Number(l.quantity || 1))}</span></li>)}
@@ -640,10 +643,11 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
               {pending ? <li className="c-mine-wait"><span>Delivery</span><span>Kitchen is adding it…</span></li> : (fee > 0 || rr.charge_mode === 'distance') && <li><span>Delivery</span><span>{fee > 0 ? money(fee) : 'Free'}</span></li>}
               <li className="c-mine-total"><span>Total</span><span>{money(Number(d.total))}{pending ? ' + delivery' : ''}</span></li>
             </ul>
+            {d.kind === 'bulk' && d.bulk && Number(d.bulk.advance) > 0 && !cancelled && (() => { const adv = Number(d.bulk.advance), got = d.bulk.advance_received || (d.payment === 'UPI' && d.payment_status === 'received'); return <p className="c-dlg-paywait">{got ? `Advance ${money(adv)} received ✓ · Balance ${money(Math.max(0, Number(d.total) - adv))} on delivery` : `Advance to pay: ${money(adv)}${d.payment === 'UPI' ? '' : ' (cash or UPI, tell the kitchen)'}`}</p> })()}
             {!cancelled && d.payment && <p className="c-dlg-paywait">{d.payment === 'UPI' ? (d.payment_status === 'pending' ? (pending ? 'UPI: pay once the delivery charge is added' : d.payment_claimed ? 'Payment sent. Waiting for verification' : d.payment_reject_reason ? 'Payment not verified. Please check and send again' : 'UPI payment pending') : 'UPI payment confirmed ✓') : 'Cash on delivery'}</p>}
             {cancelled && d.cancel_reason && <p className="c-note c-note-bad">Cancelled: {d.cancel_reason}</p>}
-            <UpiPay r={rr} order={{ ref: sel, total: Number(d.total), payment: 'UPI' }} show={upiDue} claimed={Boolean(d.payment_claimed)} reason={d.payment_reject_reason || ''} onClaimed={claimed} />
-            {d.restaurant_slug && !cancelled && <button type="button" className="c-btn c-btn-line c-mine-again" onClick={() => orderAgain(d.restaurant_slug, d.lines)}>Order again</button>}
+            <UpiPay r={rr} order={{ ref: sel, total: d.kind === 'bulk' && d.bulk && Number(d.bulk.advance) > 0 ? Number(d.bulk.advance) : Number(d.total), payment: 'UPI' }} show={upiDue} claimed={Boolean(d.payment_claimed)} reason={d.payment_reject_reason || ''} onClaimed={claimed} />
+            {d.restaurant_slug && !cancelled && <button type="button" className="c-btn c-btn-line c-mine-again" onClick={() => d.kind === 'bulk' ? bulkAgain(d.restaurant_slug, d.lines) : orderAgain(d.restaurant_slug, d.lines)}>Order again</button>}
             <button type="button" className="c-linkbtn c-mine-more" onClick={() => setTrack(t => !t)}>{track ? 'Hide tracking' : 'Track this order'}</button>
             {track && <TrackOrder key={sel} initialRef={sel} compact />}
           </>
@@ -652,6 +656,115 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
       </div>
     </div>}
   </section>
+}
+
+/* ---------- Order in bulk: its own page and flow, separate from the normal menu ---------- */
+const bulkPrice = (item, q) => { const t = (item.tiers || []).filter(x => Number(x.qty) <= q).sort((a, b) => Number(b.qty) - Number(a.qty))[0]; return t ? Number(t.price) : Number(item.price) }
+function BulkOrderPage({ r, list }) {
+  usePageBrand(r, `Order in bulk · ${r.name}`)
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('customer-details') || '{}') || {} } catch { return {} } })()
+  const [menu, setMenu] = useState(null), [qty, setQty] = useState({}), [date, setDate] = useState(''), [slot, setSlot] = useState(''), [guests, setGuests] = useState(''), [spice, setSpice] = useState(''), [packing, setPacking] = useState('Individual boxes')
+  const [name, setName] = useState(saved.name || ''), [phone, setPhone] = useState(saved.phone || ''), [address, setAddress] = useState(saved.address || ''), [notes, setNotes] = useState(''), [payment, setPayment] = useState('Cash on delivery')
+  const [sending, setSending] = useState(false), [error, setError] = useState(''), [done, setDone] = useState(null), [copied, setCopied] = useState(false), [claimed, setClaimed] = useState(false)
+  useEffect(() => {
+    if (!supabase) return setMenu({ enabled: false, items: [] })
+    supabase.rpc('get_bulk_menu', { p_restaurant: r.slug }).then(({ data }) => {
+      const m = data || { enabled: false, items: [] }; setMenu(m); if (m.earliest) setDate(m.earliest)
+      try {   // "Order again" from a past bulk order
+        const raw = JSON.parse(sessionStorage.getItem('bulk-reorder') || 'null'); sessionStorage.removeItem('bulk-reorder')
+        if (raw && raw.slug === r.slug) { const next = {}; (raw.items || []).forEach(i => { const it = (m.items || []).find(x => x.name === i.name); if (it) next[it.id] = Math.max(Number(it.min_qty || 1), Number(i.quantity || 0)) }); setQty(next) }
+      } catch { /* optional */ }
+    })
+  }, [r.slug])
+  const items = menu ? menu.items || [] : []
+  const lines = items.filter(i => qty[i.id] > 0).map(i => ({ item: i, q: Number(qty[i.id]), unit: bulkPrice(i, Number(qty[i.id])) }))
+  const plates = lines.reduce((s, l) => s + l.q, 0), subtotal = lines.reduce((s, l) => s + l.q * l.unit, 0)
+  const distance = r.charge_mode === 'distance'
+  const feeBase = Number(r.delivery_fee || 0), freeAbove = r.free_delivery_above ? Number(r.free_delivery_above) : null
+  const fee = lines.length && !distance ? (freeAbove != null && subtotal >= freeAbove ? 0 : feeBase) : 0
+  const total = subtotal + fee, pct = menu ? Number(menu.advance_pct || 0) : 0, advance = pct > 0 ? Math.ceil(subtotal * pct / 100) : 0
+  const cap = menu && menu.daily_cap != null ? Number(menu.daily_cap) : null, booked = menu && menu.booked && date ? Number(menu.booked[date] || 0) : 0
+  const left = cap != null ? Math.max(0, cap - booked) : null
+  const tooMany = left != null && plates > left
+  const belowMin = lines.find(l => l.q < Number(l.item.min_qty || 1))
+  const setQ = (id, v) => setQty(c => ({ ...c, [id]: Math.max(0, Math.min(5000, Math.floor(Number(v) || 0))) }))
+  const submit = async (e) => {
+    e.preventDefault()
+    if (sending) return
+    if (!lines.length) return setError('Add at least one item.')
+    if (belowMin) return setError(`The minimum for ${belowMin.item.name} is ${belowMin.item.min_qty} plates.`)
+    if (!date) return setError('Choose a delivery date.')
+    if (tooMany) return setError(left === 0 ? 'That date is fully booked. Please choose another date.' : `Only ${left} plates are left on that date.`)
+    setSending(true); setError('')
+    const { data, error: err } = await supabase.rpc('place_bulk_order', { p_restaurant: r.slug, p_name: name.trim(), p_phone: phone.trim(), p_address: address.trim(), p_payment: payment, p_notes: notes.trim(), p_items: lines.map(l => ({ item_id: l.item.id, quantity: l.q })), p_delivery_date: date, p_slot: slot || null, p_guests: guests ? Number(guests) : null, p_spice: spice || null, p_packing: packing || null })
+    setSending(false)
+    if (err) { const known = /^(BULK_[A-Z]+|INVALID_PHONE|RATE_LIMIT|UPI_OFF|RESTAURANT_CLOSED):/.test(err.message.replace(/^.*?(?=[A-Z_]+:)/, '')); return setError(known ? err.message.replace(/^.*?([A-Z_]+):\s*/, '') : `Could not place your order: ${err.message}`) }
+    try { localStorage.setItem('customer-details', JSON.stringify({ name: name.trim(), phone: phone.trim(), address: address.trim() })) } catch { /* optional */ }
+    setDone(data)
+  }
+  const rest = { ...r }
+  const dayText = (iso) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+  return <div className="c-app c-order c-bulk" style={themeStyle(r.slug)}>
+    <header className="c-bar"><a className="c-back" href={`/${r.slug}`} aria-label={`Back to ${r.name}`}><Ico n="back" /></a><Mark r={r} size={34} className="c-bar-mark" /><p className="c-bar-meta">Bulk orders · {r.name}</p></header>
+    <div className="c-page">
+      <h1 className="c-h1">Order in bulk</h1>
+      {menu === null && <p className="c-note">Loading…</p>}
+      {menu && !menu.enabled && <div className="c-note c-note-bad" role="status">Bulk orders are not open right now. <a className="c-linkbtn" href={`/${r.slug}/order`}>Order from the normal menu</a></div>}
+      {menu && menu.enabled && <form id="bulk-form" onSubmit={submit}>
+        <p className="c-sub c-bulk-rules">Minimum {menu.min_qty} plates per item · at least {menu.lead_days} day{menu.lead_days === 1 ? '' : 's'} ahead{pct > 0 ? ` · ${pct}% advance` : ''}{cap != null ? ` · up to ${cap} plates a day` : ''}</p>
+        {menu.note && <p className="c-note c-bulk-note">{menu.note}</p>}
+        {!items.length && <p className="c-note">The bulk menu is empty. Please check back soon.</p>}
+        <ul className="c-menu c-bulk-menu">{items.map(i => { const q = qty[i.id] || 0, min = Number(i.min_qty || 1); return <li key={i.id} className={q > 0 ? 'c-dish on' : 'c-dish'}>
+          {i.image_url ? <img className="c-dish-photo" src={i.image_url} alt="" loading="lazy" width="160" height="120" /> : <div className="c-dish-photo c-dish-ph" aria-hidden="true"><span>{(i.name || '?').trim().charAt(0).toUpperCase()}</span></div>}
+          <div className="c-dish-main"><span className="c-dish-name">{i.name}</span>{i.description && <span className="c-dish-price">{i.description}</span>}
+            <span className="c-dish-price">{money(i.price)} per plate · min {min}</span>
+            {(i.tiers || []).length > 0 && <span className="c-bulk-tiers">{(i.tiers || []).map(t => `${money(t.price)} from ${t.qty}`).join(' · ')}</span>}</div>
+          <div className="c-qty c-bulk-qty">{q === 0 ? <button type="button" className="c-add" onClick={() => setQ(i.id, min)} aria-label={`Add ${i.name}`}>Add {min}</button>
+            : <><button type="button" className="c-step" onClick={() => setQ(i.id, q - 5 < min ? 0 : q - 5)} aria-label={`Remove 5 ${i.name}`}><Ico n="minus" size={16} /></button><input className="c-bulk-n" type="number" inputMode="numeric" min="0" max="5000" value={q} onChange={e => setQ(i.id, e.target.value)} aria-label={`${i.name} plates`} /><button type="button" className="c-step" onClick={() => setQ(i.id, q + 5)} aria-label={`Add 5 ${i.name}`}><Ico n="plus" size={16} /></button></>}</div>
+        </li> })}</ul>
+
+        <h2 className="c-h2 c-cat">Date and time</h2>
+        <label className="c-field"><span>Delivery date <small>from {dayText(menu.earliest)}</small></span><input className="c-input" type="date" required min={menu.earliest} max={menu.latest} value={date} onChange={e => setDate(e.target.value)} /></label>
+        {cap != null && date && <p className={left === 0 ? 'c-note c-note-bad' : 'c-sub'} role="status">{left === 0 ? 'Fully booked on this date. Please choose another.' : `${left} plates available on ${dayText(date)}.`}</p>}
+        {(menu.slots || []).length > 0 && <label className="c-field"><span>Delivery time</span><select className="c-input" value={slot} onChange={e => setSlot(e.target.value)}><option value="">Any time</option>{menu.slots.map(s => <option key={s} value={s}>{s}</option>)}</select></label>}
+
+        <h2 className="c-h2 c-cat">About your event</h2>
+        <label className="c-field"><span>Number of guests <small>optional</small></span><input className="c-input" type="number" inputMode="numeric" min="1" value={guests} onChange={e => setGuests(e.target.value)} /></label>
+        <fieldset className="c-field"><legend>Spice level <small>optional</small></legend><div className="c-chips">{['Mild', 'Medium', 'Hot'].map(s => <label key={s} className={spice === s ? 'c-chip on' : 'c-chip'}><input type="radio" name="spice" checked={spice === s} onChange={() => setSpice(spice === s ? '' : s)} onClick={() => { if (spice === s) setSpice('') }} />{s}</label>)}</div></fieldset>
+        <fieldset className="c-field"><legend>Packing</legend><div className="c-chips">{['Individual boxes', 'Bulk trays'].map(s => <label key={s} className={packing === s ? 'c-chip on' : 'c-chip'}><input type="radio" name="packing" checked={packing === s} onChange={() => setPacking(s)} />{s}</label>)}</div></fieldset>
+
+        <h2 className="c-h2 c-cat">Delivery details</h2>
+        <label className="c-field"><span>Name</span><input className="c-input" required autoComplete="name" value={name} onChange={e => setName(e.target.value)} /></label>
+        <label className="c-field"><span>Phone number <small>10-digit mobile</small></span><input className="c-input" required maxLength={16} type="tel" inputMode="tel" autoComplete="tel" value={phone} onChange={e => setPhone(e.target.value)} /></label>
+        <label className="c-field"><span>Delivery address</span><textarea className="c-input" required rows={3} autoComplete="street-address" placeholder="Venue, building, area, landmark" value={address} onChange={e => setAddress(e.target.value)} /></label>
+        <fieldset className="c-field c-pay"><legend>Payment</legend><div className="c-chips">{PAYMENTS.filter(x => x !== 'UPI' || r.upi_enabled !== false).map(x => <label key={x} className={payment === x ? 'c-chip on' : 'c-chip'}><input type="radio" name="bulk-payment" checked={payment === x} onChange={() => setPayment(x)} />{x}</label>)}</div></fieldset>
+        <label className="c-field"><span>Notes <small>optional</small></span><textarea className="c-input" rows={2} placeholder="Anything the kitchen should know" value={notes} onChange={e => setNotes(e.target.value)} /></label>
+
+        {lines.length > 0 && <div className="c-summary" aria-label="Bulk order summary">
+          {lines.map(l => <div key={l.item.id}><span>{l.q} × {l.item.name}</span><b>{money(l.q * l.unit)}</b></div>)}
+          {distance ? <div><span>Delivery</span><b>Set by the kitchen</b></div> : feeBase > 0 && <div><span>Delivery</span><b>{fee ? money(fee) : 'Free'}</b></div>}
+          <div className="c-summary-total"><span>Total</span><b>{money(total)}{distance ? ' + delivery' : ''}</b></div>
+          {advance > 0 && <small>Advance to pay now: {money(advance)} ({pct}%). The balance is paid on delivery.</small>}
+        </div>}
+        {error && <p className="c-note c-note-bad" role="alert">{error}</p>}
+      </form>}
+    </div>
+    {menu && menu.enabled && lines.length > 0 && !done && <div className="c-cart"><div className="c-cart-sum"><b>{plates} plates</b><span>{money(total)}</span></div>
+      <button form="bulk-form" className="c-cta c-cta-accent bulk-submit" disabled={sending || tooMany}>{sending ? 'Placing order…' : 'Place bulk order'}</button></div>}
+    {done && <div className="c-dialog-wrap"><div className="c-dialog c-bulk-done" role="dialog" aria-modal="true" aria-label="Bulk order placed">
+      <img className="c-logo c-dlg-logo" src={logoFor(r.slug)} alt={`${r.name} logo`} width="64" height="64" />
+      <h2 className="c-dlg-title">Bulk order placed!</h2>
+      <div className="c-dlg-ref"><code>{done.order_number}</code><button type="button" className="c-btn c-btn-ink" onClick={async () => { await copyText(done.order_number); setCopied(true); setTimeout(() => setCopied(false), 1800) }}>{copied ? 'Copied' : 'Copy'}</button></div>
+      <p className="c-dlg-deliver">{dayText(done.delivery_date)}{done.bulk && done.bulk.slot ? ` · ${done.bulk.slot}` : ''}</p>
+      <ul className="c-dlg-items">{(done.items || []).filter(i => !String(i.name).startsWith('Note:')).map((i, k) => <li key={k}><span>{i.quantity} × {i.name}</span><span>{money(i.price * i.quantity)}</span></li>)}{done.delivery_fee > 0 && <li><span>Delivery</span><span>{money(done.delivery_fee)}</span></li>}</ul>
+      <p className="c-dlg-total">Total: {money(done.total)}{done.delivery_fee_pending ? ' + delivery' : ''}</p>
+      {Number(done.advance) > 0 && <p className="c-dlg-paywait">Advance to pay: {money(done.advance)}. The balance is paid on delivery.</p>}
+      {done.delivery_fee_pending && <p className="c-dlg-paywait">The kitchen will add your delivery charge. You will see it under My orders.</p>}
+      <UpiPay r={rest} order={{ ref: done.order_number, total: Number(done.advance) > 0 ? Number(done.advance) : Number(done.total), payment: done.payment }} show={done.payment === 'UPI' && !done.delivery_fee_pending} claimed={claimed} reason="" onClaimed={() => setClaimed(true)} />
+      <WhatsAppLink r={r} className="c-wa c-wa-dlg" />
+      <a className="c-cta c-cta-hero" href={`/${r.slug}/order?tab=orders`}>Track in My orders</a>
+    </div></div>}
+  </div>
 }
 
 /* The centred "order received" confirmation, in the restaurant's own colours */
