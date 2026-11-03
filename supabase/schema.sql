@@ -85,6 +85,7 @@ language sql stable as $$ select id from public.restaurants where slug = 'salt-a
 
 alter table public.restaurants      add column if not exists location text;
 alter table public.restaurants      add column if not exists upi_enabled boolean not null default true;
+alter table public.restaurants      add column if not exists review_url text;
 alter table public.restaurants      add column if not exists bulk_enabled boolean not null default false;
 alter table public.restaurants      add column if not exists bulk_upi_enabled boolean not null default true;
 alter table public.restaurants      add column if not exists bulk_min_qty int not null default 10;
@@ -590,7 +591,7 @@ create or replace function public.track_order(p_order_number text)
 returns jsonb
 language sql security definer set search_path = public stable as $$
   select jsonb_build_object(
-    'rating', o.rating, 'rating_comment', o.rating_comment, 'delivery_fee', o.delivery_fee, 'kind', o.kind, 'bulk', o.bulk, 'delivery_fee_pending', o.delivery_fee_pending,
+    'rating', o.rating, 'rating_comment', o.rating_comment, 'delivery_fee', o.delivery_fee, 'kind', o.kind, 'bulk', o.bulk, 'review_url', r.review_url, 'delivery_fee_pending', o.delivery_fee_pending,
     'eta_at', case when o.status in ('New', 'Cooking') and r.prep_minutes is not null and o.payment_status <> 'pending'
                     and o.delivery_date = (now() at time zone coalesce(r.timezone, 'Asia/Kolkata'))::date
                    then coalesce(o.cooking_at, o.payment_confirmed_at, o.created_at) + make_interval(mins => r.prep_minutes) end,

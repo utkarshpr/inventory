@@ -22,6 +22,12 @@ function Ico({ n, size = 22 }) {
 const readSaved = (slug) => { try { return localStorage.getItem(slug ? `last-order-ref:${slug}` : 'last-order-ref') || '' } catch { return '' } }
 // background checks pause while the phone screen is off or the tab is hidden
 const everyVisible = (fn, ms) => setInterval(() => { if (!document.hidden) fn() }, ms)
+// Google review link: only a real Google address is used
+const reviewOk = (u) => /^https:\/\/(g\.page|www\.google\.com|google\.com|maps\.app\.goo\.gl|goo\.gl|search\.google\.com)\//.test(String(u || ''))
+function ReviewCta({ url }) {
+  if (!reviewOk(url)) return null
+  return <a className="c-review" href={url} target="_blank" rel="noopener noreferrer"><span className="c-review-stars" aria-hidden="true">★★★★★</span><span className="c-review-text"><b>Enjoyed your meal?</b><small>Share your review on Google. It helps us a lot.</small></span><span aria-hidden="true" className="c-review-go">›</span></a>
+}
 const bulkAgain = (slug, items) => { try { sessionStorage.setItem('bulk-reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/bulk` }
 const orderAgain = (slug, items) => { try { sessionStorage.setItem('reorder', JSON.stringify({ slug, items: (items || []).filter(i => !String(i.name).startsWith('Note:')).map(i => ({ name: i.name, quantity: i.quantity })) })) } catch { /* optional */ } window.location.href = `/${slug}/order` }
 const itemText = (items) => (items || []).map(i => /^\d+\s*×/.test(i.name || '') ? i.name : `${i.quantity}× ${i.name}${i.options ? ` (${i.options})` : ''}`).join(', ')
@@ -109,6 +115,7 @@ function RestaurantLanding({ r, list, onStaff }) {
           ? <><a className="c-cta c-cta-hero landing-order" href={`/${r.slug}/order`}>Order now</a>{r.bulk_enabled && <a className="c-cta c-cta-btn landing-bulk" href={`/${r.slug}/bulk`}>Order in bulk</a>}</>
           : <div className="c-closed-box" role="status"><b>Closed right now</b><span>{closedText(r)}</span></div>}
         <WhatsAppLink r={r} className="c-wa c-wa-hero" />
+        {reviewOk(r.review_url) && <a className="c-wa c-wa-hero c-review-link" href={r.review_url} target="_blank" rel="noopener noreferrer"><span aria-hidden="true">★</span> Leave us a Google review</a>}
       </div>
     </section>
     <section className="c-track-wrap"><TrackOrder slug={r.slug} initialRef={savedRef} /></section>
@@ -187,6 +194,7 @@ export function TrackOrder({ initialRef, compact, slug }) {
           <ol className="c-steps">{steps.map(([status, text], i) => <li key={status} style={{ '--i': i }} className={i < current ? 'done' : i === current ? 'now' : ''}>{text}</li>)}</ol>
           <p className="c-sub">Total {money(result.total)}{Number(result.delivery_fee) > 0 ? ` (includes ${money(result.delivery_fee)} delivery)` : ''}. This updates by itself.</p>
           {result.status === 'Delivered' && <RatingBox orderRef={result.order_number} rating={result.rating} comment={result.rating_comment} onDone={() => lookup(result.order_number, true)} />}
+          {result.status === 'Delivered' && <ReviewCta url={result.review_url} />}
           {!compact && result.restaurant_slug && <button type="button" className="c-btn c-btn-line c-again-btn" onClick={() => orderAgain(result.restaurant_slug, result.items)}>Order again</button>}
         </div>)}
   </div>
@@ -652,6 +660,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
             {!cancelled && d.payment && <p className="c-dlg-paywait">{d.payment === 'UPI' ? (d.payment_status === 'pending' ? (pending ? 'UPI: pay once the delivery charge is added' : d.payment_claimed ? 'Payment sent. Waiting for verification' : d.payment_reject_reason ? 'Payment not verified. Please check and send again' : 'UPI payment pending') : 'UPI payment confirmed ✓') : 'Cash on delivery'}</p>}
             {cancelled && d.cancel_reason && <p className="c-note c-note-bad">Cancelled: {d.cancel_reason}</p>}
             <UpiPay r={rr} order={{ ref: sel, total: d.kind === 'bulk' && d.bulk && Number(d.bulk.advance) > 0 ? Number(d.bulk.advance) : Number(d.total), payment: 'UPI' }} show={upiDue} claimed={Boolean(d.payment_claimed)} reason={d.payment_reject_reason || ''} onClaimed={claimed} />
+            {d.status === 'Delivered' && <ReviewCta url={d.review_url} />}
             {d.restaurant_slug && !cancelled && <button type="button" className="c-btn c-btn-line c-mine-again" onClick={() => d.kind === 'bulk' ? bulkAgain(d.restaurant_slug, d.lines) : orderAgain(d.restaurant_slug, d.lines)}>Order again</button>}
             <button type="button" className="c-linkbtn c-mine-more" onClick={() => setTrack(t => !t)}>{track ? 'Hide tracking' : 'Track this order'}</button>
             {track && <TrackOrder key={sel} initialRef={sel} compact />}

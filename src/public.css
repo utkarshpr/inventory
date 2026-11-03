@@ -591,3 +591,13 @@ html{-webkit-text-size-adjust:100%}
 /* the address on the Place order bar is never cut off: it wraps onto more lines */
 .c-app .c-cart .c-cart-to{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere;font-size:13.5px;line-height:1.35}
 .c-app .c-cart{row-gap:4px}
+
+/* Google review */
+.c-app .c-review{display:flex;align-items:center;gap:12px;margin:14px 0 0;padding:14px 16px;border-radius:18px;background:var(--c-surface);border:1.5px solid #E2A21B;color:var(--c-ink);text-decoration:none;text-align:left}
+.c-app .c-review-stars{color:#E2A21B;font-size:18px;letter-spacing:1px;flex:none}
+.c-app .c-review-text{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.c-app .c-review-text b{font-size:16px}
+.c-app .c-review-text small{font-size:13.5px;color:var(--c-muted)}
+.c-app .c-review-go{font-size:24px;color:#E2A21B;line-height:1}
+.c-app .c-mine-dialog .c-review{background:#fff}
+.c-app .c-review-link{margin-top:10px}

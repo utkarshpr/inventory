@@ -49,7 +49,7 @@ function CopyButton({ text, label = 'Copy', aria = 'Copy', className = 'copy-min
   const [done, setDone] = useState(false)
   return <button type="button" className={className} disabled={!text} aria-label={aria} onClick={async (e) => { e.stopPropagation(); await copyText(text); setDone(true); setTimeout(() => setDone(false), 1800) }}>{done ? 'Copied' : label}</button>
 }
-const ticketBrand = { name: 'Kitchen' }  // set by the dashboard to the restaurant being managed
+const ticketBrand = { name: 'Kitchen', review: '' }  // set by the dashboard to the restaurant being managed
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]))
 /* WhatsApp message to the customer about their order (opens WhatsApp with the text ready; staff press send) */
 const customerPhone = (o) => { const d = String(o.phone || (String(o.customer || '').split('·')[1] || '')).replace(/\D/g, '').slice(-10); return /^[6-9]\d{9}$/.test(d) ? d : '' }
@@ -88,6 +88,7 @@ function whatsappLink(o, rname) {
     `*Total: ${money(total)}${o.deliveryFeePending ? ' + delivery' : ''}*`,
     pay ? `Payment: ${pay}` : '',
     '',
+    o.status === 'Delivered' && ticketBrand.review ? `Enjoyed it? Please review us on Google: ${ticketBrand.review}` : '',
     'Please come back again! 🙏',
     `— ${rname}`,
   ].filter((l, i, arr) => l !== '' || (arr[i - 1] !== '' && i > 0)).join('\n')
@@ -503,6 +504,7 @@ function App() {
   const dismissAlert = (key) => setAlerts(a => a.filter(x => x.key !== key))
   const viewAlert = (a) => { const r = restaurants.find(x => x.id === a.restaurantId); if (r && (!active || r.id !== active.id)) pickRestaurant(r.slug); setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
   ticketBrand.name = active ? active.name : ''
+  ticketBrand.review = active ? active.review_url || '' : ''
   const todayOrders = orders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = orders.filter(o => daysAgo(o.createdAt, 1))   // sales include bulk orders
   const today = analyse(todayOrders, recipeList), yesterday = analyse(yesterdayOrders, recipeList)
   const pct = (a, b) => b ? `${a >= b ? '↑' : '↓'} ${Math.abs(Math.round((a - b) / b * 100))}%` : 'New'

@@ -77,7 +77,7 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear, o
 /* This restaurant's own delivery days and WhatsApp group. Changes only affect the selected restaurant. */
 export function RestaurantSettings({ r, secrets, onSave }) {
   const todayIso = zonedNow(r.timezone || 'Asia/Kolkata').date
-  const init = () => ({ chargeMode: r.charge_mode || 'fixed', fee: String(r.delivery_fee == null ? 0 : r.delivery_fee), freeAbove: r.free_delivery_above == null ? '' : String(r.free_delivery_above), prep: r.prep_minutes == null ? '' : String(r.prep_minutes), unpaidCancel: r.unpaid_cancel_minutes == null ? '' : String(r.unpaid_cancel_minutes), mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', upi: r.upi_id || '', upiPersonal: Boolean(r.upi_personal), lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
+  const init = () => ({ chargeMode: r.charge_mode || 'fixed', fee: String(r.delivery_fee == null ? 0 : r.delivery_fee), freeAbove: r.free_delivery_above == null ? '' : String(r.free_delivery_above), prep: r.prep_minutes == null ? '' : String(r.prep_minutes), unpaidCancel: r.unpaid_cancel_minutes == null ? '' : String(r.unpaid_cancel_minutes), mode: r.delivery_mode || 'daily', weekdays: r.delivery_weekdays || [], anchor: r.delivery_anchor || todayIso, ahead: r.advance_days == null ? 6 : r.advance_days, sameDay: r.allow_same_day !== false, cutoff: (r.order_cutoff || '').slice(0, 5), whatsapp: r.whatsapp_url || '', review: r.review_url || '', upi: r.upi_id || '', upiPersonal: Boolean(r.upi_personal), lowStock: r.low_stock_alerts !== false, minOrder: String(r.min_order_value == null ? 0 : r.min_order_value), topic: (secrets && secrets.alert_topic) || '' })
   const [f, setF] = useState(init)
   useEffect(() => { setF(init()) }, [r.id, secrets && secrets.alert_topic])
   const set = (patch) => setF(cur => ({ ...cur, ...patch }))
@@ -99,14 +99,15 @@ export function RestaurantSettings({ r, secrets, onSave }) {
   }
   const effective = { ...r, delivery_mode: f.mode, delivery_weekdays: f.weekdays, delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null }
   const preview = deliveryDates(effective)
+  const reviewOkF = !f.review.trim() || /^https:\/\/(g\.page|www\.google\.com|google\.com|maps\.app\.goo\.gl|goo\.gl|search\.google\.com)\//.test(f.review.trim())
   const waOk = !f.whatsapp.trim() || /^https:\/\/chat\.whatsapp\.com\//.test(f.whatsapp.trim())
   const customEmpty = f.mode === 'custom' && !f.weekdays.length
   const toggleDay = (d) => set({ weekdays: f.weekdays.includes(d) ? f.weekdays.filter(x => x !== d) : [...f.weekdays, d] })
   const aheadOptions = [...new Set([1, 2, 3, 5, 7, 10, 14, 21, 30, Number(f.ahead)])].sort((a, b) => a - b)
   const submit = (e) => {
     e.preventDefault()
-    if (customEmpty || !waOk || !topicOk || !minOk || !upiOk || !feeOk || !freeOk || !prepOk || !cancelOk) return
-    onSave({ charge_mode: f.chargeMode, delivery_fee: Number(f.fee || 0), free_delivery_above: f.freeAbove === '' ? null : Number(f.freeAbove), prep_minutes: f.prep === '' ? null : Number(f.prep), unpaid_cancel_minutes: f.unpaidCancel === '' ? null : Number(f.unpaidCancel), delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, upi_id: f.upi.trim() || null, upi_personal: f.upiPersonal, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
+    if (customEmpty || !waOk || !reviewOkF || !topicOk || !minOk || !upiOk || !feeOk || !freeOk || !prepOk || !cancelOk) return
+    onSave({ charge_mode: f.chargeMode, delivery_fee: Number(f.fee || 0), free_delivery_above: f.freeAbove === '' ? null : Number(f.freeAbove), prep_minutes: f.prep === '' ? null : Number(f.prep), unpaid_cancel_minutes: f.unpaidCancel === '' ? null : Number(f.unpaidCancel), delivery_mode: f.mode, delivery_weekdays: f.mode === 'custom' ? f.weekdays : [], delivery_anchor: f.mode === 'alternate' ? f.anchor : null, advance_days: Number(f.ahead), allow_same_day: f.sameDay, order_cutoff: f.cutoff || null, whatsapp_url: f.whatsapp.trim() || null, review_url: f.review.trim() || null, upi_id: f.upi.trim() || null, upi_personal: f.upiPersonal, low_stock_alerts: f.lowStock, min_order_value: Number(f.minOrder || 0) }, { alert_topic: f.topic.trim() || null })
   }
   return <form className="panel rset" onSubmit={submit}>
     <div className="panel-heading"><div><h3>Delivery days · {r.name}</h3><p>Customers can only pick these days when ordering. This changes {r.name} only.</p></div></div>
@@ -184,8 +185,12 @@ export function RestaurantSettings({ r, secrets, onSave }) {
         <input type="url" inputMode="url" placeholder="https://chat.whatsapp.com/…" value={f.whatsapp} onChange={e => set({ whatsapp: e.target.value })} />
         <small>Shown as "Join our WhatsApp group" on {r.name}'s pages.</small></label>
       {!waOk && <p className="rset-warn" role="alert">Use a group invite link that starts with https://chat.whatsapp.com/</p>}
+      <label className="rset-field rset-review">Google review link
+        <input type="url" inputMode="url" aria-label="Google review link" placeholder="https://g.page/r/…/review" value={f.review} onChange={e => set({ review: e.target.value })} />
+        <small>Customers see "Leave us a Google review" on {r.name}'s main page, and a review card after their order is delivered. Leave empty to hide it.</small></label>
+      {!reviewOkF && <p className="rset-warn" role="alert">Use the Google review link (it starts with https://g.page/ or https://www.google.com/).</p>}
 
-      <button className="primary rset-save" disabled={customEmpty || !waOk || !topicOk || !minOk}>Save for {r.name}</button>
+      <button className="primary rset-save" disabled={customEmpty || !waOk || !reviewOkF || !topicOk || !minOk}>Save for {r.name}</button>
     </div>
   </form>
 }
