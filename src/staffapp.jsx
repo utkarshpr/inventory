@@ -52,7 +52,7 @@ function CopyButton({ text, label = 'Copy', aria = 'Copy', className = 'copy-min
   const [done, setDone] = useState(false)
   return <button type="button" className={className} disabled={!text} aria-label={aria} onClick={async (e) => { e.stopPropagation(); await copyText(text); setDone(true); setTimeout(() => setDone(false), 1800) }}>{done ? 'Copied' : label}</button>
 }
-const ticketBrand = { slug: '', name: 'Kitchen', review: '', logo: '', tagline: '', location: '', help: '' }  // set by the dashboard to the restaurant being managed
+const ticketBrand = { slug: '', upi: '', upiPersonal: false, name: 'Kitchen', review: '', logo: '', tagline: '', location: '', help: '' }  // set by the dashboard to the restaurant being managed
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]))
 /* WhatsApp message to the customer about their order (opens WhatsApp with the text ready; staff press send) */
 const customerPhone = (o) => { const d = String(o.phone || (String(o.customer || '').split('·')[1] || '')).replace(/\D/g, '').slice(-10); return /^[6-9]\d{9}$/.test(d) ? d : '' }
@@ -115,29 +115,34 @@ td{padding:3px 0 2px;vertical-align:top;border-bottom:1px dotted #bbb;line-heigh
 .opt{font-size:10px;display:block}
 .note{border:1px dashed #000;padding:3px 5px;margin:3px 0;font-weight:800;font-size:11px;word-break:break-word}
 .tot table{margin-top:3px}.tot td{border:0;padding:1px 0;font-size:12px}.tot .grand td{border-top:2px solid #000;font-size:14px;font-weight:900;padding-top:3px}
-.qr{text-align:center;margin-top:6px;font-size:10px;font-weight:700}.qr img{display:block;margin:0 auto 2px;image-rendering:pixelated}
+.qr{text-align:center;margin-top:6px;font-size:10px;font-weight:700}.qr img{display:block;margin:0 auto 2px;image-rendering:pixelated}.qr .upiid{font-weight:400;word-break:break-all}
 .meta{font-size:10px;color:#000;margin:3px 0}
 .foot{text-align:center;margin-top:6px;padding-top:5px;border-top:1px dashed #000;font-size:10px;line-height:1.5}.foot b{font-size:12px;display:block}
 @page{margin:2mm;size:58mm auto}@media print{body{width:58mm}}`
-/* Scannable code for the restaurant's order page, as a PNG data URL (prints cleanly on thermal paper and survives Save as Image). */
-const orderQrImg = () => {
-  if (!ticketBrand.slug) return ''
+/* The restaurant's own UPI payment QR (PNG data URL, so it prints cleanly on thermal paper and survives Save as Image).
+   Amount is filled in only for business UPI IDs and orders still unpaid; personal IDs get a plain "pay" code. */
+const upiQrImg = (o) => {
+  if (!/^[A-Za-z0-9._-]{2,64}@[A-Za-z]{2,32}$/.test(ticketBrand.upi)) return ''
   try {
-    const m = qrMatrix(`${window.location.origin}/${ticketBrand.slug}/order`), q = 2, px = 4, size = (m.length + q * 2) * px
+    const name = String(ticketBrand.name || 'Kitchen').replace(/&/g, 'and').replace(/[^A-Za-z0-9]/g, '')
+    const withAmt = o && !ticketBrand.upiPersonal && o.paymentStatus !== 'received' && o.status !== 'Cancelled' && Number(o.total) > 0
+    const note = o ? String(o.id || '').replace(/[^A-Za-z0-9-]/g, '') : ''
+    const link = `upi://pay?pa=${ticketBrand.upi}&pn=${name}${withAmt ? `&am=${Number(o.total).toFixed(2)}` : ''}&cu=INR${withAmt && note ? `&tn=${note}` : ''}`
+    const m = qrMatrix(link), q = 2, px = 4, size = (m.length + q * 2) * px
     const c = document.createElement('canvas'); c.width = c.height = size
     const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, size, size); g.fillStyle = '#000'
     m.forEach((row, y) => row.forEach((v, x) => { if (v) g.fillRect((x + q) * px, (y + q) * px, px, px) }))
-    return `<div class="qr"><img src="${c.toDataURL('image/png')}" width="110" height="110" alt="QR"><div>Scan to order again</div></div>`
+    return `<div class="qr"><img src="${c.toDataURL('image/png')}" width="120" height="120" alt="UPI QR"><div>Scan to pay by UPI</div><div class="upiid">${esc(ticketBrand.upi)}</div></div>`
   } catch { return '' }
 }
-const printDoc = (title, bodyHtml) => {
+const printDoc = (title, bodyHtml, order) => {
   const w = window.open('', '_blank', 'width=320,height=820')
   if (!w) { window.alert('Please allow pop-ups to print.'); return null }
   const sub = [ticketBrand.tagline, ticketBrand.location].filter(Boolean).join(' · ')
   const toolbar = `<style>.tb{display:flex;gap:6px;justify-content:center;padding:8px 4px 4px;border-bottom:1px solid #ccc;margin-bottom:6px;background:#f5f5f5}@media print{.tb{display:none}}.btn{font:bold 11px sans-serif;border:1px solid #888;border-radius:4px;padding:4px 10px;cursor:pointer;background:#fff}.btn:hover{background:#eee}</style><div class="tb"><button class="btn" onclick="window.print()">🖨 Print / Save PDF</button><button class="btn" id="imgBtn">📷 Save as Image</button></div>`
   const h2c = `<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>`
   const dl = `<script>document.getElementById('imgBtn').onclick=function(){const el=document.getElementById('ticket');html2canvas(el,{scale:3,useCORS:true,backgroundColor:'#fff'}).then(c=>{const a=document.createElement('a');a.download=${JSON.stringify(title)}+'.png';a.href=c.toDataURL('image/png');a.click()})}<\/script>`
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style>${h2c}</head><body>${toolbar}<div id="ticket"><div class="head"><div class="brand">${esc(ticketBrand.name)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>${bodyHtml}${orderQrImg()}</div>${dl}</body></html>`)
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style>${h2c}</head><body>${toolbar}<div id="ticket"><div class="head"><div class="brand">${esc(ticketBrand.name)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>${bodyHtml}${upiQrImg(order)}</div>${dl}</body></html>`)
   w.document.close(); w.focus()
   return w
 }
@@ -165,7 +170,7 @@ ${notes.map(n => `<div class="note">${esc(String(n.name).replace(/^Note:\s*/, 'N
 <table class="tot"><tr><td>Items (${plates})</td><td class="r">${money(sub)}</td></tr>${discount ? `<tr><td>Discount</td><td class="r">−${money(discount)}</td></tr>` : ''}<tr><td>Delivery</td><td class="r">${o.deliveryFeePending ? 'to be added' : fee ? money(fee) : 'Free'}</td></tr><tr class="grand"><td>Total</td><td class="r">${money(total)}</td></tr></table>
 <div class="meta">Placed ${esc(o.placed || o.time || '')} · Status: ${esc(o.status)}</div>
 <div class="foot"><b>Thank you! Please come back again.</b>${/^\d{10,15}$/.test(ticketBrand.help) ? `<div>Need help? WhatsApp +${esc(ticketBrand.help)}</div>` : ''}</div>`
-  printDoc(o.id, body)
+  printDoc(o.id, body, o)
 }
 // One shared audio context: browsers keep sound blocked until the first tap, so we unlock it early and show when it is not ready.
 let audioCtx = null
@@ -569,7 +574,7 @@ function App() {
   const toggleOpen = () => active.is_open ? setCloseDialog({ message: '' }) : setOpen(true)
   const dismissAlert = (key) => setAlerts(a => a.filter(x => x.key !== key))
   const viewAlert = (a) => { const r = restaurants.find(x => x.id === a.restaurantId); if (r && (!active || r.id !== active.id)) pickRestaurant(r.slug); setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
-  ticketBrand.name = active ? active.name : ''; ticketBrand.slug = active ? active.slug : ''
+  ticketBrand.name = active ? active.name : ''; ticketBrand.slug = active ? active.slug : ''; ticketBrand.upi = active ? active.upi_id || '' : ''; ticketBrand.upiPersonal = Boolean(active && active.upi_personal)
   ticketBrand.review = active ? active.review_url || '' : ''
   ticketBrand.logo = active ? logoFor(active.slug) || '' : ''; ticketBrand.tagline = active ? active.tagline || '' : ''; ticketBrand.location = active ? active.location || '' : ''; ticketBrand.help = active ? active.help_whatsapp || '' : ''
   const todayOrders = orders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = orders.filter(o => daysAgo(o.createdAt, 1))   // sales include bulk orders
@@ -629,7 +634,7 @@ function printInvoice(o, rname) {
 <table><thead><tr><th>Item</th><th class="r">Plates</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
 <table class="tot"><tr><td>Items</td><td class="r">${money(sub)}</td></tr><tr><td>Delivery charge</td><td class="r">${fee ? money(fee) : 'Free'}</td></tr><tr class="grand"><td>Total</td><td class="r">${money(o.total)}</td></tr>${adv ? `<tr><td>Advance paid</td><td class="r">−${money(adv)}</td></tr><tr class="grand"><td>Balance to pay</td><td class="r">${money(Math.max(0, Number(o.total) - adv))}</td></tr>` : ''}</table>
 <div class="meta">Payment: ${esc(o.payment || '')}</div><div class="foot"><b>Thank you! Please come back again.</b></div>`
-  printDoc(`Invoice ${o.id}`, body)
+  printDoc(`Invoice ${o.id}`, body, o)
 }
 function BulkRowInfo({ o }) {
   const b = o.bulk || {}, adv = Number(b.advance || 0), got = b.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')
