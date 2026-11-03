@@ -125,7 +125,7 @@ function RestaurantLanding({ r, list, onStaff }) {
 
 /* ---------- Order tracking (works with any reference number) ---------- */
 export function TrackOrder({ initialRef, compact, slug }) {
-  const [code, setCode] = useState(() => readSaved(slug)), [result, setResult] = useState(null), [msg, setMsg] = useState(''), [active, setActive] = useState(''), [list, setList] = useState(null)
+  const [code, setCode] = useState(() => readSaved(slug)), [result, setResult] = useState(null), [msg, setMsg] = useState(''), [active, setActive] = useState(''), [list, setList] = useState(null), [popup, setPopup] = useState(false)
   const PAGE = 5
   const phoneOf = (v) => { const t = (v || '').trim(); return /^[+\d\s-]+$/.test(t) && t.replace(/\D/g, '').length >= 10 ? t : '' }
   const loadPhone = async (phone, page) => {
@@ -133,7 +133,7 @@ export function TrackOrder({ initialRef, compact, slug }) {
     setMsg('Checking…')
     const { data, error } = await supabase.rpc('track_orders_by_phone', { p_phone: phone, p_limit: PAGE, p_offset: page * PAGE })
     if (error) return setMsg((error.message || '').replace(/^INVALID_PHONE:\s*/, '') || 'Could not check this number.')
-    setResult(null); setActive('')
+    setResult(null); setActive(''); setPopup(false)
     if (!data || !data.total) { setList(null); return setMsg('No orders found for that phone number.') }
     setList({ phone, page, total: data.total, orders: data.orders }); setMsg('')
   }
@@ -151,6 +151,11 @@ export function TrackOrder({ initialRef, compact, slug }) {
   }
   useEffect(() => { if (initialRef) { setCode(initialRef); lookup(initialRef) } }, [initialRef])
   useEffect(() => {
+    if (!popup) return
+    const k = (e) => { if (e.key === 'Escape') setPopup(false) }
+    document.addEventListener('keydown', k); return () => document.removeEventListener('keydown', k)
+  }, [popup])
+  useEffect(() => {
     if (!active || ['Delivered', 'Cancelled'].includes(result?.status)) return
     const timer = everyVisible(() => lookup(active, true), result?.payment_status === 'pending' ? 5000 : 15000)
     return () => clearInterval(timer)
@@ -160,25 +165,7 @@ export function TrackOrder({ initialRef, compact, slug }) {
   const steps = payFlow ? [['Payment', result.payment_status === 'pending' ? (result.payment_claimed ? 'Payment sent, waiting for verification' : 'Payment confirmation pending') : 'Payment confirmed'], ...STEPS] : STEPS
   const current = result && result.payment_status === 'pending' ? 0 : steps.findIndex(([status]) => status === result?.status)
   const label = result && result.payment_status === 'pending' ? (result.payment_claimed ? 'Verifying payment' : 'Payment pending') : (steps[current] || [])[1]
-  return <div className="c-track">
-    {!compact && <>
-      <h2 className="c-h2">Track your order</h2>
-      <form className="track-form c-trackform" onSubmit={e => { e.preventDefault(); lookup(code) }}>
-        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Reference or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
-        <button className="c-btn c-btn-ink">Track</button>
-      </form>
-    </>}
-    {msg && <p className="c-note">{msg}</p>}
-    {list && <div className="c-orders" aria-label="Orders for this phone number">
-      <p className="c-sub">{list.total} order{list.total === 1 ? '' : 's'} for this number. Tap one to see its status.</p>
-      <ul className="c-ordlist">{list.orders.map(o => <li key={o.order_number}><button type="button" className={o.order_number === active ? 'c-ordrow on' : 'c-ordrow'} onClick={() => lookup(o.order_number, true)}>
-        {logoFor(o.restaurant_slug) && <img className="c-logo" src={logoFor(o.restaurant_slug)} alt="" width="32" height="32" />}
-        <span className="c-ordmain"><b>{o.order_number}</b><small>{o.restaurant} · {placedText(o.placed_at)} · {money(o.total)}{o.payment_status === 'pending' && o.status !== 'Cancelled' ? ' · payment pending' : ''}</small><small className="c-orditems">{itemText(o.items)}</small></span>
-        <span className={o.status === 'Cancelled' ? 'c-pill bad' : o.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{o.payment_status === 'pending' && o.status !== 'Cancelled' ? 'Payment pending' : o.status}</span>
-      </button>{o.restaurant_slug && <button type="button" className="c-again" onClick={() => orderAgain(o.restaurant_slug, o.items)}>Order again</button>}</li>)}</ul>
-      {list.total > PAGE && <div className="c-pager"><button type="button" className="c-btn c-btn-line" disabled={list.page === 0} onClick={() => loadPhone(list.phone, list.page - 1)}>Previous</button><span>Page {list.page + 1} of {Math.ceil(list.total / PAGE)}</span><button type="button" className="c-btn c-btn-line" disabled={(list.page + 1) * PAGE >= list.total} onClick={() => loadPhone(list.phone, list.page + 1)}>Next</button></div>}
-    </div>}
-    {result && (result.status === 'Cancelled'
+  const detail = result && (result.status === 'Cancelled'
       ? <p className="c-note c-note-bad">Order {result.order_number} was cancelled.{result.cancel_reason ? <> <b>Reason:</b> {result.cancel_reason}</> : ' Please contact the kitchen.'}</p>
       : <div className="track-result c-result">
           {result.restaurant && <p className="c-rest-chip">{logoFor(result.restaurant_slug) && <img className="c-logo" src={logoFor(result.restaurant_slug)} alt="" width="24" height="24" />}<span>{result.restaurant}</span></p>}
@@ -193,10 +180,33 @@ export function TrackOrder({ initialRef, compact, slug }) {
           {result.delivery_date && <p className="c-sub c-deliver">Delivery: {deliveryText(result.delivery_date, zonedNow('Asia/Kolkata').date)}</p>}
           <ol className="c-steps">{steps.map(([status, text], i) => <li key={status} style={{ '--i': i }} className={i < current ? 'done' : i === current ? 'now' : ''}>{text}</li>)}</ol>
           <p className="c-sub">Total {money(result.total)}{Number(result.delivery_fee) > 0 ? ` (includes ${money(result.delivery_fee)} delivery)` : ''}. This updates by itself.</p>
-          {result.status === 'Delivered' && <RatingBox orderRef={result.order_number} rating={result.rating} comment={result.rating_comment} onDone={() => lookup(result.order_number, true)} />}
+          {result.status === 'Delivered' && result.rating_enabled && <RatingBox orderRef={result.order_number} rating={result.rating} comment={result.rating_comment} onDone={() => lookup(result.order_number, true)} />}
           {result.status === 'Delivered' && <ReviewCta url={result.review_url} />}
           {!compact && result.restaurant_slug && <button type="button" className="c-btn c-btn-line c-again-btn" onClick={() => orderAgain(result.restaurant_slug, result.items)}>Order again</button>}
-        </div>)}
+        </div>)
+  return <div className="c-track">
+    {!compact && <>
+      <h2 className="c-h2">Track your order</h2>
+      <form className="track-form c-trackform" onSubmit={e => { e.preventDefault(); lookup(code) }}>
+        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Reference or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
+        <button className="c-btn c-btn-ink">Track</button>
+      </form>
+    </>}
+    {msg && <p className="c-note">{msg}</p>}
+    {list && <div className="c-orders" aria-label="Orders for this phone number">
+      <p className="c-sub">{list.total} order{list.total === 1 ? '' : 's'} for this number. Tap one to see its status, track it or leave a review.</p>
+      <ul className="c-ordlist">{list.orders.map(o => <li key={o.order_number}><button type="button" className={o.order_number === active ? 'c-ordrow on' : 'c-ordrow'} onClick={() => { setPopup(true); lookup(o.order_number, true) }}>
+        {logoFor(o.restaurant_slug) && <img className="c-logo" src={logoFor(o.restaurant_slug)} alt="" width="32" height="32" />}
+        <span className="c-ordmain"><b>{o.order_number}</b><small>{o.restaurant} · {placedText(o.placed_at)} · {money(o.total)}{o.payment_status === 'pending' && o.status !== 'Cancelled' ? ' · payment pending' : ''}</small><small className="c-orditems">{itemText(o.items)}</small></span>
+        <span className={o.status === 'Cancelled' ? 'c-pill bad' : o.status === 'Delivered' ? 'c-pill done' : 'c-pill'}>{o.payment_status === 'pending' && o.status !== 'Cancelled' ? 'Payment pending' : o.status}</span>
+      </button>{o.restaurant_slug && <button type="button" className="c-again" onClick={() => orderAgain(o.restaurant_slug, o.items)}>Order again</button>}</li>)}</ul>
+      {list.total > PAGE && <div className="c-pager"><button type="button" className="c-btn c-btn-line" disabled={list.page === 0} onClick={() => loadPhone(list.phone, list.page - 1)}>Previous</button><span>Page {list.page + 1} of {Math.ceil(list.total / PAGE)}</span><button type="button" className="c-btn c-btn-line" disabled={(list.page + 1) * PAGE >= list.total} onClick={() => loadPhone(list.phone, list.page + 1)}>Next</button></div>}
+    </div>}
+    {popup && result ? <div className="c-dialog-wrap" onMouseDown={e => { if (e.target === e.currentTarget) setPopup(false) }}>
+      <div className="c-dialog c-mine-dialog c-track-dialog" role="dialog" aria-modal="true" aria-label={`Order ${result.order_number}`}>
+        <div className="c-track">{detail}</div>
+        <button type="button" className="c-cta c-cta-hero" onClick={() => setPopup(false)}>Close</button>
+      </div></div> : detail}
   </div>
 }
 

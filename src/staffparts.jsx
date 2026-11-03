@@ -185,6 +185,8 @@ export function RestaurantSettings({ r, secrets, onSave }) {
         <input type="url" inputMode="url" placeholder="https://chat.whatsapp.com/…" value={f.whatsapp} onChange={e => set({ whatsapp: e.target.value })} />
         <small>Shown as "Join our WhatsApp group" on {r.name}'s pages.</small></label>
       {!waOk && <p className="rset-warn" role="alert">Use a group invite link that starts with https://chat.whatsapp.com/</p>}
+      <div className="rset-switch"><div><b>Ask for a star rating</b><small>{r.rating_enabled ? 'After delivery, customers can rate their order with stars. Ratings show in Reports.' : 'Off. Customers are not asked to rate with stars. The Google review card is separate.'}</small></div>
+        <button type="button" role="switch" aria-checked={Boolean(r.rating_enabled)} aria-label="Ask for a star rating" className={r.rating_enabled ? 'switch on ok' : 'switch'} onClick={() => onSave({ rating_enabled: !r.rating_enabled })}><i/></button></div>
       <label className="rset-field rset-review">Google review link
         <input type="url" inputMode="url" aria-label="Google review link" placeholder="https://g.page/r/…/review" value={f.review} onChange={e => set({ review: e.target.value })} />
         <small>Customers see "Leave us a Google review" on {r.name}'s main page, and a review card after their order is delivered. Leave empty to hide it.</small></label>

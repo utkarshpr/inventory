@@ -601,3 +601,10 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-review-go{font-size:24px;color:#E2A21B;line-height:1}
 .c-app .c-mine-dialog .c-review{background:#fff}
 .c-app .c-review-link{margin-top:10px}
+
+/* Order details open in a popup from the "Track your order" list */
+.c-app .c-track-dialog{text-align:left}
+.c-app .c-track-dialog .c-track{margin:0 0 14px}
+.c-app .c-track-dialog .c-result{background:#fff;border-radius:20px;padding:16px;color:var(--c-ink)}
+.c-app .c-track-dialog .c-result-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.c-app .c-track-dialog .c-steps{text-align:left}
