@@ -606,22 +606,23 @@ language sql security definer set search_path = public stable as $$
 $$;
 -- Orders for one phone number, newest first, a page at a time. Shows date, status, items and quantities only: no names, addresses or prices.
 drop function if exists public.track_orders_by_phone(text, int, int);
-create or replace function public.track_orders_by_phone(p_phone text, p_limit int default 5, p_offset int default 0, p_restaurant text default null)
+drop function if exists public.track_orders_by_phone(text, int, int, text);
+create or replace function public.track_orders_by_phone(p_phone text, p_limit int default 5, p_offset int default 0, p_restaurant text default null, p_kind text default null)
 returns jsonb
 language plpgsql security definer set search_path = public stable as $$
 declare v_phone text := right(regexp_replace(coalesce(p_phone, ''), '\D', '', 'g'), 10); v_lim int := least(greatest(coalesce(p_limit, 5), 1), 20); v_off int := greatest(coalesce(p_offset, 0), 0); v_total int; v_rows jsonb;
 begin
   if length(v_phone) <> 10 or v_phone !~ '^[6-9]' then raise exception 'INVALID_PHONE: Enter a valid 10-digit mobile number'; end if;
-  select count(*) into v_total from public.orders o0 where o0.customer_phone = v_phone and (p_restaurant is null or o0.restaurant_id = (select id from public.restaurants where slug = p_restaurant));
+  select count(*) into v_total from public.orders o0 where o0.customer_phone = v_phone and (p_restaurant is null or o0.restaurant_id = (select id from public.restaurants where slug = p_restaurant)) and (p_kind is null or o0.kind = p_kind);
   select coalesce(jsonb_agg(x order by x_at desc), '[]'::jsonb) into v_rows from (
     select jsonb_build_object('rating', o.rating, 'order_number', o.order_number, 'status', o.status, 'total', o.total, 'placed_at', o.created_at,
       'delivery_date', o.delivery_date, 'cancel_reason', o.cancel_reason, 'payment_status', o.payment_status, 'payment_claimed', o.payment_claimed_at is not null, 'payment_reject_reason', o.payment_reject_reason, 'kind', o.kind, 'delivery_fee_pending', o.delivery_fee_pending, 'items', public.public_items(o.items), 'restaurant', r.name, 'restaurant_slug', r.slug) as x, o.created_at as x_at
     from public.orders o join public.restaurants r on r.id = o.restaurant_id
-    where o.customer_phone = v_phone and (p_restaurant is null or r.slug = p_restaurant) order by o.created_at desc limit v_lim offset v_off) s;
+    where o.customer_phone = v_phone and (p_restaurant is null or r.slug = p_restaurant) and (p_kind is null or o.kind = p_kind) order by o.created_at desc limit v_lim offset v_off) s;
   return jsonb_build_object('total', v_total, 'limit', v_lim, 'offset', v_off, 'orders', v_rows);
 end $$;
-revoke all on function public.track_orders_by_phone(text, int, int, text) from public;
-grant execute on function public.track_orders_by_phone(text, int, int, text) to anon, authenticated;
+revoke all on function public.track_orders_by_phone(text, int, int, text, text) from public;
+grant execute on function public.track_orders_by_phone(text, int, int, text, text) to anon, authenticated;
 
 revoke all on function public.track_order(text) from public;
 grant execute on function public.track_order(text) to anon, authenticated;

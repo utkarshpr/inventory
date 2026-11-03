@@ -57,7 +57,7 @@ export function OrderAlerts({ alerts, restaurants, onDismiss, onView, onClear, o
       return <article key={a.key} className="oa-card" style={themeStyle(r && r.slug)}>
         <header className="oa-head">
           {r ? <Mark r={r} size={30} /> : <span />}
-          <span className="oa-new">{o.kind === 'bulk' ? 'New BULK order' : 'New order'}{r ? ` · ${r.name}` : ''}</span>
+          <span className="oa-new">{o.kind === 'bulk' ? 'New FEAST order' : 'New order'}{r ? ` · ${r.name}` : ''}</span>
           <button type="button" className="oa-x" aria-label="Dismiss" onClick={() => onDismiss(a.key)}>×</button>
         </header>
         <div className="oa-ref"><b>{o.id}</b><span>{o.createdAt ? new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>
