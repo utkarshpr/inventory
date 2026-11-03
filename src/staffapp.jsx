@@ -5,6 +5,7 @@ import { RestaurantSwitcher, OpenToggle, OrderAlerts, RestaurantSettings, LiveSt
 import './staff.css'
 import { AdminLogin, copyText } from './public'
 import { FEAST } from './names'
+import { qrMatrix } from './qr'
 const PAGE_LABEL = { Bulk: FEAST.page }   // the page id stays 'Bulk'; only the visible name changes
 
 const newOrderNumber = (prefix) => `${prefix}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
@@ -51,7 +52,7 @@ function CopyButton({ text, label = 'Copy', aria = 'Copy', className = 'copy-min
   const [done, setDone] = useState(false)
   return <button type="button" className={className} disabled={!text} aria-label={aria} onClick={async (e) => { e.stopPropagation(); await copyText(text); setDone(true); setTimeout(() => setDone(false), 1800) }}>{done ? 'Copied' : label}</button>
 }
-const ticketBrand = { name: 'Kitchen', review: '', logo: '', tagline: '', location: '', help: '' }  // set by the dashboard to the restaurant being managed
+const ticketBrand = { slug: '', name: 'Kitchen', review: '', logo: '', tagline: '', location: '', help: '' }  // set by the dashboard to the restaurant being managed
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]))
 /* WhatsApp message to the customer about their order (opens WhatsApp with the text ready; staff press send) */
 const customerPhone = (o) => { const d = String(o.phone || (String(o.customer || '').split('·')[1] || '')).replace(/\D/g, '').slice(-10); return /^[6-9]\d{9}$/.test(d) ? d : '' }
@@ -114,9 +115,21 @@ td{padding:3px 0 2px;vertical-align:top;border-bottom:1px dotted #bbb;line-heigh
 .opt{font-size:10px;display:block}
 .note{border:1px dashed #000;padding:3px 5px;margin:3px 0;font-weight:800;font-size:11px;word-break:break-word}
 .tot table{margin-top:3px}.tot td{border:0;padding:1px 0;font-size:12px}.tot .grand td{border-top:2px solid #000;font-size:14px;font-weight:900;padding-top:3px}
+.qr{text-align:center;margin-top:6px;font-size:10px;font-weight:700}.qr img{display:block;margin:0 auto 2px;image-rendering:pixelated}
 .meta{font-size:10px;color:#000;margin:3px 0}
 .foot{text-align:center;margin-top:6px;padding-top:5px;border-top:1px dashed #000;font-size:10px;line-height:1.5}.foot b{font-size:12px;display:block}
 @page{margin:2mm;size:58mm auto}@media print{body{width:58mm}}`
+/* Scannable code for the restaurant's order page, as a PNG data URL (prints cleanly on thermal paper and survives Save as Image). */
+const orderQrImg = () => {
+  if (!ticketBrand.slug) return ''
+  try {
+    const m = qrMatrix(`${window.location.origin}/${ticketBrand.slug}/order`), q = 2, px = 4, size = (m.length + q * 2) * px
+    const c = document.createElement('canvas'); c.width = c.height = size
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, size, size); g.fillStyle = '#000'
+    m.forEach((row, y) => row.forEach((v, x) => { if (v) g.fillRect((x + q) * px, (y + q) * px, px, px) }))
+    return `<div class="qr"><img src="${c.toDataURL('image/png')}" width="110" height="110" alt="QR"><div>Scan to order again</div></div>`
+  } catch { return '' }
+}
 const printDoc = (title, bodyHtml) => {
   const w = window.open('', '_blank', 'width=320,height=820')
   if (!w) { window.alert('Please allow pop-ups to print.'); return null }
@@ -124,7 +137,7 @@ const printDoc = (title, bodyHtml) => {
   const toolbar = `<style>.tb{display:flex;gap:6px;justify-content:center;padding:8px 4px 4px;border-bottom:1px solid #ccc;margin-bottom:6px;background:#f5f5f5}@media print{.tb{display:none}}.btn{font:bold 11px sans-serif;border:1px solid #888;border-radius:4px;padding:4px 10px;cursor:pointer;background:#fff}.btn:hover{background:#eee}</style><div class="tb"><button class="btn" onclick="window.print()">🖨 Print / Save PDF</button><button class="btn" id="imgBtn">📷 Save as Image</button></div>`
   const h2c = `<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>`
   const dl = `<script>document.getElementById('imgBtn').onclick=function(){const el=document.getElementById('ticket');html2canvas(el,{scale:3,useCORS:true,backgroundColor:'#fff'}).then(c=>{const a=document.createElement('a');a.download=${JSON.stringify(title)}+'.png';a.href=c.toDataURL('image/png');a.click()})}<\/script>`
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style>${h2c}</head><body>${toolbar}<div id="ticket"><div class="head"><div class="brand">${esc(ticketBrand.name)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>${bodyHtml}</div>${dl}</body></html>`)
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style>${h2c}</head><body>${toolbar}<div id="ticket"><div class="head"><div class="brand">${esc(ticketBrand.name)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>${bodyHtml}${orderQrImg()}</div>${dl}</body></html>`)
   w.document.close(); w.focus()
   return w
 }
@@ -556,7 +569,7 @@ function App() {
   const toggleOpen = () => active.is_open ? setCloseDialog({ message: '' }) : setOpen(true)
   const dismissAlert = (key) => setAlerts(a => a.filter(x => x.key !== key))
   const viewAlert = (a) => { const r = restaurants.find(x => x.id === a.restaurantId); if (r && (!active || r.id !== active.id)) pickRestaurant(r.slug); setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
-  ticketBrand.name = active ? active.name : ''
+  ticketBrand.name = active ? active.name : ''; ticketBrand.slug = active ? active.slug : ''
   ticketBrand.review = active ? active.review_url || '' : ''
   ticketBrand.logo = active ? logoFor(active.slug) || '' : ''; ticketBrand.tagline = active ? active.tagline || '' : ''; ticketBrand.location = active ? active.location || '' : ''; ticketBrand.help = active ? active.help_whatsapp || '' : ''
   const todayOrders = orders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = orders.filter(o => daysAgo(o.createdAt, 1))   // sales include bulk orders
