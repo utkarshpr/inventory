@@ -24,6 +24,15 @@ const readSaved = (slug) => { try { return localStorage.getItem(slug ? `last-ord
 const everyVisible = (fn, ms) => setInterval(() => { if (!document.hidden) fn() }, ms)
 // Google review link: only a real Google address is used
 const reviewOk = (u) => /^https:\/\/(g\.page|www\.google\.com|google\.com|maps\.app\.goo\.gl|goo\.gl|search\.google\.com)\//.test(String(u || ''))
+// Each restaurant's own help line on WhatsApp (digits with country code)
+const helpOk = (n) => /^[0-9]{10,15}$/.test(String(n || ''))
+function HelpLink({ r, orderRef, className = 'c-help', short }) {
+  if (!r || !helpOk(r.help_whatsapp)) return null
+  const text = `Hi ${r.name}, I need help${orderRef ? ` with my order ${orderRef}` : ''}.`
+  return <a className={className} href={`https://wa.me/${r.help_whatsapp}?text=${encodeURIComponent(text)}`} target="_blank" rel="noopener noreferrer">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-12.4 7.4L3 20.5l1.7-5.4A8.4 8.4 0 1 1 21 11.5Z" /></svg>
+    {short ? <span><b>Need help?</b></span> : <span><b>Need help?</b> Chat with {r.name} on WhatsApp</span>}</a>
+}
 function ReviewCta({ url }) {
   if (!reviewOk(url)) return null
   return <a className="c-review" href={url} target="_blank" rel="noopener noreferrer"><span className="c-review-stars" aria-hidden="true">★★★★★</span><span className="c-review-text"><b>Enjoyed your meal?</b><small>Share your review on Google. It helps us a lot.</small></span><span aria-hidden="true" className="c-review-go">›</span></a>
@@ -114,8 +123,11 @@ function RestaurantLanding({ r, list, onStaff }) {
         {r.is_open
           ? <><a className="c-cta c-cta-hero landing-order" href={`/${r.slug}/order`}>Order now</a>{r.bulk_enabled && <a className="c-cta c-cta-btn landing-bulk" href={`/${r.slug}/bulk`}>Order in bulk</a>}</>
           : <div className="c-closed-box" role="status"><b>Closed right now</b><span>{closedText(r)}</span></div>}
-        <WhatsAppLink r={r} className="c-wa c-wa-hero" />
-        {reviewOk(r.review_url) && <a className="c-wa c-wa-hero c-review-link" href={r.review_url} target="_blank" rel="noopener noreferrer"><span aria-hidden="true">★</span> Leave us a Google review</a>}
+        <div className="c-hero-extras">
+          <WhatsAppLink r={r} className="c-wa c-wa-hero" />
+          {reviewOk(r.review_url) && <a className="c-wa c-wa-hero c-review-link" href={r.review_url} target="_blank" rel="noopener noreferrer"><span aria-hidden="true">★</span> Google review</a>}
+          <HelpLink r={r} className="c-wa c-wa-hero c-help-link" short />
+        </div>
       </div>
     </section>
     <section className="c-track-wrap"><TrackOrder slug={r.slug} initialRef={savedRef} /></section>
@@ -188,7 +200,7 @@ export function TrackOrder({ initialRef, compact, slug }) {
     {!compact && <>
       <h2 className="c-h2">Track your order</h2>
       <form className="track-form c-trackform" onSubmit={e => { e.preventDefault(); lookup(code) }}>
-        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Order number or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
+        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Order or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
         <button className="c-btn c-btn-ink">Track</button>
       </form>
       <p className="c-sub c-track-hint">Type your <b>order number</b> (like SS-AB12CD) or the <b>phone number</b> you ordered with. A phone number shows all your orders.</p>
@@ -207,7 +219,7 @@ export function TrackOrder({ initialRef, compact, slug }) {
       <div className="c-dialog c-mine-dialog c-track-dialog" role="dialog" aria-modal="true" aria-label={`Order ${result.order_number}`}>
         <div className="c-track">{detail}</div>
         <button type="button" className="c-cta c-cta-hero" onClick={() => setPopup(false)}>Close</button>
-      </div></div> : detail}
+      </div></div> : (list ? null : detail)}   {/* from a phone-number list the details open only in the popup */}
   </div>
 }
 
@@ -413,7 +425,7 @@ function OrderPage({ r, list }) {
       : <div className="c-page">
           {tab === 'menu' && activeOrder && <button type="button" className="c-active-bar" onClick={() => setTab('orders')}><span>Your order <b>{activeOrder.order_number}</b>: {activeOrder.delivery_fee_pending ? 'waiting for the delivery charge' : activeOrder.status === 'New' ? 'received' : activeOrder.status.toLowerCase()}</span><span aria-hidden="true">›</span></button>}
           <div className="c-tabs" role="tablist" aria-label="Order page"><button type="button" role="tab" aria-selected={tab === 'menu'} className={tab === 'menu' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('menu')}>Menu</button><button type="button" role="tab" aria-selected={tab === 'orders'} className={tab === 'orders' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('orders')}>My orders</button></div>
-          {tab === 'orders' && <><MyOrders r={r} all={list} phone={custPhone} setPhone={(v) => { setCustPhone(v); if (v) { try { const o = JSON.parse(localStorage.getItem('customer-details') || '{}') || {}; localStorage.setItem('customer-details', JSON.stringify({ ...o, phone: v })) } catch { /* optional */ } } else { try { localStorage.removeItem('customer-details') } catch { /* optional */ } setHasSaved(false) } }} refresh={placed && placed.ref} onPayClaimed={(ref) => setPayState(s => s && s.ref === ref ? { ...s, claimed: true, reason: '' } : s)} /><button type="button" className="c-btn c-btn-line c-mine-back" onClick={() => setTab('menu')}>Back to menu</button></>}
+          {tab === 'orders' && <><MyOrders r={r} all={list} phone={custPhone} setPhone={(v) => { setCustPhone(v); if (v) { try { const o = JSON.parse(localStorage.getItem('customer-details') || '{}') || {}; localStorage.setItem('customer-details', JSON.stringify({ ...o, phone: v })) } catch { /* optional */ } } else { try { localStorage.removeItem('customer-details') } catch { /* optional */ } setHasSaved(false) } }} refresh={placed && placed.ref} onPayClaimed={(ref) => setPayState(s => s && s.ref === ref ? { ...s, claimed: true, reason: '' } : s)} /><button type="button" className="c-btn c-btn-line c-mine-back" onClick={() => setTab('menu')}>Back to menu</button><HelpLink r={r} /></>}
 
           {tab === 'menu' && r.bulk_enabled && <a className="c-bulk-promo" href={`/${r.slug}/bulk`}><span className="c-bulk-promo-text"><b>Want to order in bulk?</b><small>Parties, offices and events. Click here.</small></span><span aria-hidden="true" className="c-bulk-promo-go">›</span></a>}
           <form id="order-form" onSubmit={submit} hidden={tab !== 'menu'}>
@@ -476,6 +488,7 @@ function OrderPage({ r, list }) {
             <label className="c-field"><span>Notes <small>optional</small></span><textarea className="c-input" rows={2} placeholder="Spice level, allergies, delivery instructions" value={notes} onChange={e => setNotes(e.target.value)} /></label>
             {error && <p className="c-note c-note-bad" role="alert">{error}</p>}
           </form>
+          {tab === 'menu' && <HelpLink r={r} />}
         </div>}
 
     {sheet && <OptionSheet dish={sheet} options={optsOf(sheet)} halfPrice={hasHalf(sheet) ? halfPrice(sheet) : null} onClose={() => setSheet(null)} onAdd={(ids) => { step(`${sheet.id}|${ids.slice().sort().join('+')}`, 1); setSheet(null) }} />}
@@ -672,6 +685,7 @@ function MyOrders({ r, all, phone, setPhone, refresh, onPayClaimed }) {
             {cancelled && d.cancel_reason && <p className="c-note c-note-bad">Cancelled: {d.cancel_reason}</p>}
             <UpiPay r={rr} order={{ ref: sel, total: d.kind === 'bulk' && d.bulk && Number(d.bulk.advance) > 0 ? Number(d.bulk.advance) : Number(d.total), payment: 'UPI' }} show={upiDue} claimed={Boolean(d.payment_claimed)} reason={d.payment_reject_reason || ''} onClaimed={claimed} />
             {d.status === 'Delivered' && <ReviewCta url={d.review_url} />}
+            <HelpLink r={rr} orderRef={sel} className="c-help c-help-dialog" />
             {d.restaurant_slug && !cancelled && <button type="button" className="c-btn c-btn-line c-mine-again" onClick={() => d.kind === 'bulk' ? bulkAgain(d.restaurant_slug, d.lines) : orderAgain(d.restaurant_slug, d.lines)}>Order again</button>}
             <button type="button" className="c-linkbtn c-mine-more" onClick={() => setTrack(t => !t)}>{track ? 'Hide tracking' : 'Track this order'}</button>
             {track && <TrackOrder key={sel} initialRef={sel} compact />}
@@ -779,6 +793,7 @@ function BulkOrderPage({ r, list }) {
         </div>}
         {error && <p className="c-note c-note-bad" role="alert">{error}</p>}
       </form>}
+      <HelpLink r={r} />
     </div>
     {menu && menu.enabled && lines.length > 0 && !done && <div className="c-cart">
       {address.trim() && <div className="c-cart-to">Delivering to <b>{address.trim()}</b></div>}<div className="c-cart-sum"><b>{plates} plates</b><span>{money(total)}</span></div>
@@ -794,6 +809,7 @@ function BulkOrderPage({ r, list }) {
       {done.delivery_fee_pending && <p className="c-dlg-paywait">The kitchen will add your delivery charge. You will see it under My orders.</p>}
       <UpiPay r={rest} order={{ ref: done.order_number, total: Number(done.advance) > 0 ? Number(done.advance) : Number(done.total), payment: done.payment }} show={done.payment === 'UPI' && !done.delivery_fee_pending} claimed={claimed} reason="" onClaimed={() => setClaimed(true)} />
       <WhatsAppLink r={r} className="c-wa c-wa-dlg" />
+      <HelpLink r={r} orderRef={done.order_number} className="c-wa c-wa-dlg c-help-link" />
       <a className="c-cta c-cta-hero" href={`/${r.slug}/order?tab=orders`}>Track in My orders</a>
     </div></div>}
   </div>
@@ -826,6 +842,7 @@ function OrderDialog({ r, order, copied, onCopy, onClose, payStatus, payClaimed,
       {feePending && <p className="c-dlg-paywait" role="status">The kitchen will add your delivery charge. Close this and keep ordering: the charge shows under Your orders.</p>}
       <UpiPay r={r} order={order} show={payStatus === 'pending' && !feePending} claimed={payClaimed} reason={payReason} onClaimed={onClaimed} />
       <WhatsAppLink r={r} className="c-wa c-wa-dlg" />
+      <HelpLink r={r} orderRef={order.ref} className="c-wa c-wa-dlg c-help-link" />
       <p className="c-dlg-hint">Keep this number to track your order.</p>
       <button ref={done} type="button" className="c-cta c-cta-hero" onClick={onClose}>Done</button>
     </div>

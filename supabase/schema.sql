@@ -86,6 +86,7 @@ language sql stable as $$ select id from public.restaurants where slug = 'salt-a
 alter table public.restaurants      add column if not exists location text;
 alter table public.restaurants      add column if not exists upi_enabled boolean not null default true;
 alter table public.restaurants      add column if not exists review_url text;
+alter table public.restaurants      add column if not exists help_whatsapp text;   -- digits with country code, e.g. 919122132363
 alter table public.restaurants      add column if not exists rating_enabled boolean not null default false;
 alter table public.restaurants      add column if not exists bulk_enabled boolean not null default false;
 alter table public.restaurants      add column if not exists bulk_upi_enabled boolean not null default true;
@@ -1387,3 +1388,9 @@ alter table public.bulk_items add constraint bulk_items_diet_check check (diet i
 -- First time only: a guess from the dish name. Staff can change it for any dish.
 update public.recipes set diet = case when lower(name) ~ '(chicken|mutton|egg|fish|prawn|keema|lamb|beef|pork|crab|seafood|meat)' then 'nonveg' else 'veg' end where diet is null;
 update public.bulk_items set diet = case when lower(name) ~ '(chicken|mutton|egg|fish|prawn|keema|lamb|beef|pork|crab|seafood|meat)' then 'nonveg' else 'veg' end where diet is null;
+
+-- ============================================================
+-- 15. Help WhatsApp number per restaurant (digits only, with country code)
+-- ============================================================
+alter table public.restaurants drop constraint if exists restaurants_help_whatsapp_check;
+alter table public.restaurants add constraint restaurants_help_whatsapp_check check (help_whatsapp is null or help_whatsapp ~ '^[0-9]{10,15}$');
