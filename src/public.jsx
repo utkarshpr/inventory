@@ -188,9 +188,10 @@ export function TrackOrder({ initialRef, compact, slug }) {
     {!compact && <>
       <h2 className="c-h2">Track your order</h2>
       <form className="track-form c-trackform" onSubmit={e => { e.preventDefault(); lookup(code) }}>
-        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Reference or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
+        <input className="c-input" value={code} onChange={e => setCode(e.target.value)} placeholder="Order number or phone number" aria-label="Order reference number" autoCapitalize="characters" autoCorrect="off" spellCheck="false" />
         <button className="c-btn c-btn-ink">Track</button>
       </form>
+      <p className="c-sub c-track-hint">Type your <b>order number</b> (like SS-AB12CD) or the <b>phone number</b> you ordered with. A phone number shows all your orders.</p>
     </>}
     {msg && <p className="c-note">{msg}</p>}
     {list && <div className="c-orders" aria-label="Orders for this phone number">

@@ -608,3 +608,6 @@ html{-webkit-text-size-adjust:100%}
 .c-app .c-track-dialog .c-result{background:#fff;border-radius:20px;padding:16px;color:var(--c-ink)}
 .c-app .c-track-dialog .c-result-head{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .c-app .c-track-dialog .c-steps{text-align:left}
+
+.c-app .c-track-hint{margin:8px 0 0;font-size:14px;color:var(--c-muted)}
+.c-app .c-track-hint b{color:var(--c-ink)}
