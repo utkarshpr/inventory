@@ -1,11 +1,11 @@
 // The customer-facing name of the "bulk order" feature lives here: change these words to rename it everywhere.
 export const FEAST = {
-  title: 'Feast Orders',        // page title and headings
-  cta: 'Order a feast',         // button on the restaurant page
-  ask: 'Planning a feast?',     // banner on the normal order page
-  askSub: 'Parties, offices and events. Click here.',
-  tag: 'Feast',                 // small label on orders
-  placed: 'Feast order placed!',
-  place: 'Place feast order',
-  page: 'Feasts',               // staff menu entry
+  title: 'Big Table',                              // page title and headings
+  cta: 'Order for the big table',                  // button on the restaurant page
+  ask: 'Cooking for a crowd?',                     // banner on the normal order page
+  askSub: 'Parties, offices and events. Big Table is for you. Click here.',
+  tag: 'Big Table',                                // small label on orders
+  placed: 'Big Table order placed!',
+  place: 'Place Big Table order',
+  page: 'Big Table',                               // staff menu entry
 }

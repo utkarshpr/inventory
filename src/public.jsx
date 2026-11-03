@@ -757,8 +757,8 @@ function BulkOrderPage({ r, list }) {
       <h1 className="c-h1">{FEAST.title}</h1>
       <a className="c-bulk-promo c-solo-promo" href={`/${r.slug}/order`}><span className="c-bulk-promo-text"><b>Ordering just for yourself?</b><small>Use the regular menu. Click here.</small></span><span aria-hidden="true" className="c-bulk-promo-go">›</span></a>
       {menu === null && <p className="c-note">Loading…</p>}
-      {menu && !menu.enabled && <div className="c-note c-note-bad" role="status">{FEAST.title} are not open right now. <a className="c-linkbtn" href={`/${r.slug}/order`}>Order from the normal menu</a></div>}
-      {menu && menu.enabled && <div className="c-tabs" role="tablist" aria-label="Feast orders"><button type="button" role="tab" aria-selected={tab === 'menu'} className={tab === 'menu' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('menu')}>Menu</button><button type="button" role="tab" aria-selected={tab === 'orders'} className={tab === 'orders' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('orders')}>My orders</button></div>}
+      {menu && !menu.enabled && <div className="c-note c-note-bad" role="status">{FEAST.title} is not open right now. <a className="c-linkbtn" href={`/${r.slug}/order`}>Order from the normal menu</a></div>}
+      {menu && menu.enabled && <div className="c-tabs" role="tablist" aria-label="Big Table orders"><button type="button" role="tab" aria-selected={tab === 'menu'} className={tab === 'menu' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('menu')}>Menu</button><button type="button" role="tab" aria-selected={tab === 'orders'} className={tab === 'orders' ? 'c-tab on' : 'c-tab'} onClick={() => setTab('orders')}>My orders</button></div>}
       {menu && menu.enabled && tab === 'orders' && <>
         <MyOrders r={r} all={list} kind="bulk" phone={custPhone} setPhone={(v) => { setCustPhone(v); try { const o = JSON.parse(localStorage.getItem('customer-details') || '{}') || {}; if (v) localStorage.setItem('customer-details', JSON.stringify({ ...o, phone: v })); else localStorage.removeItem('customer-details') } catch { /* optional */ } }} refresh={done && done.order_number} />
         <button type="button" className="c-btn c-btn-line c-mine-back" onClick={() => setTab('menu')}>Back to menu</button>
@@ -766,7 +766,7 @@ function BulkOrderPage({ r, list }) {
       {menu && menu.enabled && <form id="bulk-form" onSubmit={submit} hidden={tab !== 'menu'}>
         <p className="c-sub c-bulk-rules">Minimum {menu.min_qty} plates per item · at least {menu.lead_days} day{menu.lead_days === 1 ? '' : 's'} ahead{pct > 0 ? ` · ${pct}% advance` : ''}{cap != null ? ` · up to ${cap} plates a day` : ''}</p>
         {menu.note && <p className="c-note c-bulk-note">{menu.note}</p>}
-        {!items.length && <p className="c-note">The feast menu is empty. Please check back soon.</p>}
+        {!items.length && <p className="c-note">The Big Table menu is empty. Please check back soon.</p>}
         {allItems.some(i => i.diet) && <DietChips value={diet} onChange={setDiet} />}
         <ul className="c-menu c-bulk-menu">{items.map(i => { const q = qty[i.id] || 0, min = Number(i.min_qty || 1); return <li key={i.id} className={q > 0 ? 'c-dish on' : 'c-dish'}>
           {i.image_url ? <img className="c-dish-photo" src={i.image_url} alt="" loading="lazy" width="160" height="120" /> : <div className="c-dish-photo c-dish-ph" aria-hidden="true"><span>{(i.name || '?').trim().charAt(0).toUpperCase()}</span></div>}
@@ -793,7 +793,7 @@ function BulkOrderPage({ r, list }) {
         <fieldset className="c-field c-pay"><legend>Payment</legend><div className="c-chips">{PAYMENTS.filter(x => x !== 'UPI' || r.bulk_upi_enabled !== false).map(x => <label key={x} className={payment === x ? 'c-chip on' : 'c-chip'}><input type="radio" name="bulk-payment" checked={payment === x} onChange={() => setPayment(x)} />{x}</label>)}</div></fieldset>
         <label className="c-field"><span>Notes <small>optional</small></span><textarea className="c-input" rows={2} placeholder="Anything the kitchen should know" value={notes} onChange={e => setNotes(e.target.value)} /></label>
 
-        {lines.length > 0 && <div className="c-summary" aria-label="Feast order summary">
+        {lines.length > 0 && <div className="c-summary" aria-label="Big Table order summary">
           {lines.map(l => <div key={l.item.id}><span>{l.q} × {l.item.name}</span><b>{money(l.q * l.unit)}</b></div>)}
           {distance ? <div><span>Delivery</span><b>Set by the kitchen</b></div> : feeBase > 0 && <div><span>Delivery</span><b>{fee ? money(fee) : 'Free'}</b></div>}
           <div className="c-summary-total"><span>Total</span><b>{money(total)}{distance ? ' + delivery' : ''}</b></div>
@@ -806,7 +806,7 @@ function BulkOrderPage({ r, list }) {
     {menu && menu.enabled && tab === 'menu' && lines.length > 0 && !done && <div className="c-cart">
       {address.trim() && <div className="c-cart-to">Delivering to <b>{address.trim()}</b></div>}<div className="c-cart-sum"><b>{plates} plates</b><span>{money(total)}</span></div>
       <button form="bulk-form" className="c-cta c-cta-accent bulk-submit" disabled={sending || tooMany}>{sending ? 'Placing order…' : FEAST.place}</button></div>}
-    {done && <div className="c-dialog-wrap"><div className="c-dialog c-bulk-done" role="dialog" aria-modal="true" aria-label="Feast order placed">
+    {done && <div className="c-dialog-wrap"><div className="c-dialog c-bulk-done" role="dialog" aria-modal="true" aria-label="Big Table order placed">
       <img className="c-logo c-dlg-logo" src={logoFor(r.slug)} alt={`${r.name} logo`} width="64" height="64" />
       <h2 className="c-dlg-title">{FEAST.placed}</h2>
       <div className="c-dlg-ref"><code>{done.order_number}</code><button type="button" className="c-btn c-btn-ink" onClick={async () => { await copyText(done.order_number); setCopied(true); setTimeout(() => setCopied(false), 1800) }}>{copied ? 'Copied' : 'Copy'}</button></div>
