@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from './supabase'
-import { useRestaurants, themeStyle, Mark, zonedNow, addDaysIso, dayLabel, dateText, deliveryText } from './restaurants'
+import { useRestaurants, themeStyle, Mark, zonedNow, addDaysIso, dayLabel, dateText, deliveryText, logoFor } from './restaurants'
 import { RestaurantSwitcher, OpenToggle, OrderAlerts, RestaurantSettings, LiveStrip, OrderLimitsSettings, AppInstallCard, systemNotify, GoalCard, CouponsSettings, BackupCard, TeamCard, usePaged, Pager, NeedsAttention, HelpPage } from './staffparts'
 import './staff.css'
 import { AdminLogin, copyText } from './public'
@@ -51,7 +51,7 @@ function CopyButton({ text, label = 'Copy', aria = 'Copy', className = 'copy-min
   const [done, setDone] = useState(false)
   return <button type="button" className={className} disabled={!text} aria-label={aria} onClick={async (e) => { e.stopPropagation(); await copyText(text); setDone(true); setTimeout(() => setDone(false), 1800) }}>{done ? 'Copied' : label}</button>
 }
-const ticketBrand = { name: 'Kitchen', review: '' }  // set by the dashboard to the restaurant being managed
+const ticketBrand = { name: 'Kitchen', review: '', logo: '', tagline: '', location: '', help: '' }  // set by the dashboard to the restaurant being managed
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]))
 /* WhatsApp message to the customer about their order (opens WhatsApp with the text ready; staff press send) */
 const customerPhone = (o) => { const d = String(o.phone || (String(o.customer || '').split('·')[1] || '')).replace(/\D/g, '').slice(-10); return /^[6-9]\d{9}$/.test(d) ? d : '' }
@@ -96,12 +96,63 @@ function whatsappLink(o, rname) {
   ].filter((l, i, arr) => l !== '' || (arr[i - 1] !== '' && i > 0)).join('\n')
   return `https://wa.me/91${phone}?text=${encodeURIComponent(text)}`
 }
+/* Printed pages: the restaurant's logo as a faint background, a header, and the order laid out so it can be read at a glance. */
+const PRINT_CSS = `*{box-sizing:border-box;margin:0;padding:0}body{font:12px/1.35 'Courier New',Courier,monospace;width:220px;margin:0;padding:4px 4px 10px;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.head{text-align:center;padding:4px 0 5px;border-bottom:2px solid #000;margin-bottom:4px}
+.head .brand{font-size:16px;font-weight:900;letter-spacing:.04em;line-height:1.1}
+.head .sub{font-size:10px;margin-top:1px}
+.ref{display:flex;justify-content:space-between;font-weight:900;font-size:14px;margin:4px 0 2px}
+.tag{font-size:10px;font-weight:700;text-transform:uppercase;border:1px solid #000;padding:0 4px;display:inline-block}
+.when{font-weight:800;font-size:12px;margin:3px 0}
+.box{border:2px solid #000;padding:3px 5px;margin:4px 0;font-weight:800;text-align:center;font-size:11px;word-break:break-all}
+.sec{margin:3px 0;font-size:11px}.sec .l{font-size:9px;text-transform:uppercase;letter-spacing:.07em}
+.addr{font-size:11px;font-weight:700;word-break:break-word;white-space:pre-wrap}
+hr{border:0;border-top:1px dashed #000;margin:4px 0}
+table{width:100%;border-collapse:collapse;font-size:11px}th{font-size:9px;text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #000;padding:2px 0;text-align:left}
+td{padding:3px 0 2px;vertical-align:top;border-bottom:1px dotted #bbb;line-height:1.25}
+.q{width:26px;font-weight:900}.r{text-align:right;white-space:nowrap}.n{word-break:break-word}
+.opt{font-size:10px;display:block}
+.note{border:1px dashed #000;padding:3px 5px;margin:3px 0;font-weight:800;font-size:11px;word-break:break-word}
+.tot table{margin-top:3px}.tot td{border:0;padding:1px 0;font-size:12px}.tot .grand td{border-top:2px solid #000;font-size:14px;font-weight:900;padding-top:3px}
+.meta{font-size:10px;color:#000;margin:3px 0}
+.foot{text-align:center;margin-top:6px;padding-top:5px;border-top:1px dashed #000;font-size:10px;line-height:1.5}.foot b{font-size:12px;display:block}
+@page{margin:2mm;size:58mm auto}@media print{body{width:58mm}}`
+const printDoc = (title, bodyHtml) => {
+  const w = window.open('', '_blank', 'width=320,height=820')
+  if (!w) { window.alert('Please allow pop-ups to print.'); return null }
+  const sub = [ticketBrand.tagline, ticketBrand.location].filter(Boolean).join(' · ')
+  const toolbar = `<style>.tb{display:flex;gap:6px;justify-content:center;padding:8px 4px 4px;border-bottom:1px solid #ccc;margin-bottom:6px;background:#f5f5f5}@media print{.tb{display:none}}.btn{font:bold 11px sans-serif;border:1px solid #888;border-radius:4px;padding:4px 10px;cursor:pointer;background:#fff}.btn:hover{background:#eee}</style><div class="tb"><button class="btn" onclick="window.print()">🖨 Print / Save PDF</button><button class="btn" id="imgBtn">📷 Save as Image</button></div>`
+  const h2c = `<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"><\/script>`
+  const dl = `<script>document.getElementById('imgBtn').onclick=function(){const el=document.getElementById('ticket');html2canvas(el,{scale:3,useCORS:true,backgroundColor:'#fff'}).then(c=>{const a=document.createElement('a');a.download=${JSON.stringify(title)}+'.png';a.href=c.toDataURL('image/png');a.click()})}<\/script>`
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style>${h2c}</head><body>${toolbar}<div id="ticket"><div class="head"><div class="brand">${esc(ticketBrand.name)}</div>${sub ? `<div class="sub">${esc(sub)}</div>` : ''}</div>${bodyHtml}</div>${dl}</body></html>`)
+  w.document.close(); w.focus()
+  return w
+}
 function printTicket(o) {
-  const w = window.open('', '_blank', 'width=380,height=640')
-  if (!w) return window.alert('Please allow pop-ups to print the ticket.')
-  const rows = orderLines(o).map(l => `<tr><td>${esc(l.quantity)}×</td><td>${esc(l.name)}${l.options ? ` (${esc(l.options)})` : ''}</td><td class="r">${l.price ? '₹' + esc(l.price * l.quantity) : ''}</td></tr>`).join('')
-  w.document.write(`<!doctype html><html><head><title>${esc(o.id)}</title><style>body{font:13px/1.45 'Courier New',monospace;margin:18px;color:#000}h1{font-size:16px;margin:0 0 2px}hr{border:0;border-top:1px dashed #000;margin:10px 0}table{width:100%;border-collapse:collapse}td{padding:2px 0;vertical-align:top}.r{text-align:right}.big{font-size:15px;font-weight:bold}</style></head><body><h1>${esc(ticketBrand.name)}</h1><div>${esc(o.placed || o.time)}</div><div class="big">Deliver: ${esc(deliveryText(o.deliveryDate, ''))}</div><hr><div class="big">${esc(o.id)}</div><div>${esc(o.channel)} · ${esc(o.status)}</div><div>${esc(o.customer)}</div>${o.address ? `<div>${esc(o.address)}</div>` : ''}${o.payment ? `<div>Payment: ${esc(o.payment)}</div>` : ''}<hr><table>${rows}</table><hr><div class="big">Total: ₹${esc(o.total)}</div></body></html>`)
-  w.document.close(); w.focus(); setTimeout(() => w.print(), 250)
+  const money = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`
+  const all = orderLines(o), notes = all.filter(l => String(l.name).startsWith('Note:')), lines = all.filter(l => !String(l.name).startsWith('Note:'))
+  const sub = lines.reduce((t, l) => t + Number(l.price || 0) * Number(l.quantity || 1), 0), fee = Number(o.deliveryFee || 0), total = Number(o.total || 0)
+  const discount = sub > 0 ? Math.max(0, Math.round(sub + fee - total)) : 0
+  const plates = lines.reduce((t, l) => t + Number(l.quantity || 1), 0)
+  const b = o.bulk || {}, isBig = o.kind === 'bulk'
+  const adv = isBig && Number(b.advance) > 0 && (b.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')) ? Number(b.advance) : 0
+  const cash = /cash/i.test(o.payment || '')
+  const payText = o.status === 'Cancelled' ? 'CANCELLED' : o.paymentStatus === 'received' ? `PAID · ${esc(o.payment || 'UPI')}${adv ? ` (advance ${money(adv)}, balance ${money(Math.max(0, total - adv))} on delivery)` : ''}` : o.paymentStatus === 'pending' ? 'UPI NOT PAID YET' : cash ? `COLLECT ${money(Math.max(0, total - adv))} IN CASH` : esc(o.payment || '')
+  const rows = lines.map(l => `<tr><td class="q">${esc(l.quantity)}×</td><td>${esc(l.name)}${l.options ? `<span class="opt">${esc(l.options)}</span>` : ''}</td><td class="r">${l.price ? money(Number(l.price) * Number(l.quantity || 1)) : ''}</td></tr>`).join('')
+  const extra = [b.slot && `Time: ${esc(b.slot)}`, b.guests && `Guests: ${esc(b.guests)}`, b.spice && `Spice: ${esc(b.spice)}`].filter(Boolean).join(' · ')
+  const phone = customerPhone(o)
+  const body = `<div class="ref"><div class="no">${esc(o.id)}</div><div class="tag">${isBig ? 'Big Table' : esc(o.channel || 'Order')}</div></div>
+<div class="when">Deliver: ${esc(deliveryText(o.deliveryDate, ''))}</div>
+${extra ? `<div class="meta">${extra}</div>` : ''}
+<div class="box">${payText}</div>
+<div class="sec"><div class="l">Customer</div><b>${esc(String(o.customer || '').split('·')[0].trim() || 'Guest')}</b>${phone ? ` · ${esc(phone)}` : ''}</div>
+${o.address ? `<div class="sec"><div class="l">Deliver to</div><div class="addr">${esc(o.address)}</div></div>` : ''}
+<table><thead><tr><th>Qty</th><th>Item</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+${notes.map(n => `<div class="note">${esc(String(n.name).replace(/^Note:\s*/, 'NOTE: '))}</div>`).join('')}
+<table class="tot"><tr><td>Items (${plates})</td><td class="r">${money(sub)}</td></tr>${discount ? `<tr><td>Discount</td><td class="r">−${money(discount)}</td></tr>` : ''}<tr><td>Delivery</td><td class="r">${o.deliveryFeePending ? 'to be added' : fee ? money(fee) : 'Free'}</td></tr><tr class="grand"><td>Total</td><td class="r">${money(total)}</td></tr></table>
+<div class="meta">Placed ${esc(o.placed || o.time || '')} · Status: ${esc(o.status)}</div>
+<div class="foot"><b>Thank you! Please come back again.</b>${/^\d{10,15}$/.test(ticketBrand.help) ? `<div>Need help? WhatsApp +${esc(ticketBrand.help)}</div>` : ''}</div>`
+  printDoc(o.id, body)
 }
 // One shared audio context: browsers keep sound blocked until the first tap, so we unlock it early and show when it is not ready.
 let audioCtx = null
@@ -507,6 +558,7 @@ function App() {
   const viewAlert = (a) => { const r = restaurants.find(x => x.id === a.restaurantId); if (r && (!active || r.id !== active.id)) pickRestaurant(r.slug); setPage('Orders'); setHighlight(a.order.id); dismissAlert(a.key) }
   ticketBrand.name = active ? active.name : ''
   ticketBrand.review = active ? active.review_url || '' : ''
+  ticketBrand.logo = active ? logoFor(active.slug) || '' : ''; ticketBrand.tagline = active ? active.tagline || '' : ''; ticketBrand.location = active ? active.location || '' : ''; ticketBrand.help = active ? active.help_whatsapp || '' : ''
   const todayOrders = orders.filter(o => daysAgo(o.createdAt, 0)), yesterdayOrders = orders.filter(o => daysAgo(o.createdAt, 1))   // sales include bulk orders
   const today = analyse(todayOrders, recipeList), yesterday = analyse(yesterdayOrders, recipeList)
   const pct = (a, b) => b ? `${a >= b ? '↑' : '↓'} ${Math.abs(Math.round((a - b) / b * 100))}%` : 'New'
@@ -554,12 +606,17 @@ const Stat=({label,value,change,good,note='vs. yesterday'})=><div className="sta
 const NEXT_STEP = { New: ['Cooking', 'Start cooking'], Cooking: ['Ready', 'Mark ready'], Ready: ['Delivered', 'Mark delivered'] }
 /* ---------- Bulk orders (admin) ---------- */
 function printInvoice(o, rname) {
-  const w = window.open('', '_blank'); if (!w) return window.alert('Please allow pop-ups to print the invoice.')
   const lines = orderLines(o).filter(l => !String(l.name).startsWith('Note:')), money = (n) => `₹${Math.round(Number(n) || 0).toLocaleString('en-IN')}`
-  const sub = lines.reduce((s, l) => s + Number(l.price || 0) * Number(l.quantity || 1), 0), fee = Number(o.deliveryFee || 0)
+  const sub = lines.reduce((t, l) => t + Number(l.price || 0) * Number(l.quantity || 1), 0), fee = Number(o.deliveryFee || 0)
   const adv = o.bulk && Number(o.bulk.advance) > 0 && (o.bulk.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')) ? Number(o.bulk.advance) : 0
   const rows = lines.map(l => `<tr><td>${esc(l.name)}</td><td class="r">${esc(l.quantity)}</td><td class="r">${money(l.price)}</td><td class="r">${money(Number(l.price || 0) * Number(l.quantity || 1))}</td></tr>`).join('')
-  w.document.write(`<!doctype html><html><head><title>Invoice ${esc(o.id)}</title><style>body{font:14px system-ui;max-width:640px;margin:24px auto;padding:0 16px}table{width:100%;border-collapse:collapse}td,th{padding:6px 4px;border-bottom:1px solid #ddd;text-align:left}.r{text-align:right}h1{margin:0}tfoot td{font-weight:700}</style></head><body><h1>${esc(rname)}</h1><p>Invoice ${esc(o.id)} · ${esc(o.placed || o.time || '')}</p><p><b>${esc(String(o.customer || '').split('·')[0].trim())}</b> · ${esc(o.phone || '')}<br>${esc(o.address || '')}<br>Delivery: ${esc(o.deliveryDate || '')}${o.bulk && o.bulk.slot ? ' · ' + esc(o.bulk.slot) : ''}</p><table><thead><tr><th>Item</th><th class="r">Plates</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="3">Items</td><td class="r">${money(sub)}</td></tr><tr><td colspan="3">Delivery charge</td><td class="r">${fee ? money(fee) : 'Free'}</td></tr><tr><td colspan="3">Total</td><td class="r">${money(o.total)}</td></tr>${adv ? `<tr><td colspan="3">Advance paid</td><td class="r">−${money(adv)}</td></tr><tr><td colspan="3">Balance to pay</td><td class="r">${money(Math.max(0, Number(o.total) - adv))}</td></tr>` : ''}</tfoot></table><p>Payment: ${esc(o.payment || '')}</p><p>Thank you. Please come back again!</p><script>window.print()<\/script></body></html>`); w.document.close()
+  const body = `<div class="ref"><div class="no">Invoice ${esc(o.id)}</div><div class="tag">Big Table</div></div><div class="meta">${esc(o.placed || o.time || '')}</div>
+<div class="sec"><div class="l">Billed to</div><b>${esc(String(o.customer || '').split('·')[0].trim())}</b> · ${esc(o.phone || '')}<br>${esc(o.address || '')}</div>
+<div class="when">Delivery: ${esc(deliveryText(o.deliveryDate, ''))}${o.bulk && o.bulk.slot ? ' · ' + esc(o.bulk.slot) : ''}</div>
+<table><thead><tr><th>Item</th><th class="r">Plates</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+<table class="tot"><tr><td>Items</td><td class="r">${money(sub)}</td></tr><tr><td>Delivery charge</td><td class="r">${fee ? money(fee) : 'Free'}</td></tr><tr class="grand"><td>Total</td><td class="r">${money(o.total)}</td></tr>${adv ? `<tr><td>Advance paid</td><td class="r">−${money(adv)}</td></tr><tr class="grand"><td>Balance to pay</td><td class="r">${money(Math.max(0, Number(o.total) - adv))}</td></tr>` : ''}</table>
+<div class="meta">Payment: ${esc(o.payment || '')}</div><div class="foot"><b>Thank you! Please come back again.</b></div>`
+  printDoc(`Invoice ${o.id}`, body)
 }
 function BulkRowInfo({ o }) {
   const b = o.bulk || {}, adv = Number(b.advance || 0), got = b.advance_received || (o.payment === 'UPI' && o.paymentStatus === 'received')
